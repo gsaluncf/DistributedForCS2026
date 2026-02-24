@@ -1,0 +1,890 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Project: Build a Decentralized Ad Counting Network</title>
+</head>
+
+<body>
+
+    <!-- ============================================================ -->
+    <!-- Video intro block: BitTorrent -> 2032 transition             -->
+    <!-- ============================================================ -->
+    <div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">Watch First: How BitTorrent Works</h2>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Before diving into this project, watch this 11-minute video. It explains the BitTorrent protocol - the same ideas your node will use: peers, gossip, heartbeats, and choking.</p>
+        <p style="margin: 15px 0;">
+            <a href="https://www.youtube.com/watch?v=dleYEIHuTQo"
+               style="display: inline-block; background-color: #1e40af; color: #ffffff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: bold;"
+               target="_blank">Watch: How Does BitTorrent Work? (11 min)</a>
+        </p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">As you watch, pay attention to four ideas in particular:</p>
+        <ul style="color: #1e293b; font-size: 15px; line-height: 2.0; margin-left: 20px;">
+            <li><strong style="color: #1e40af;">Peers and trackers</strong> - how nodes find each other without a central server</li>
+            <li><strong style="color: #1e40af;">Seeding vs. leeching</strong> - why cooperation matters in a decentralized network</li>
+            <li><strong style="color: #1e40af;">Choking</strong> - how the protocol enforces fairness by cutting off free-riders</li>
+            <li><strong style="color: #1e40af;">DHT (distributed hash table)</strong> - how peers find each other when there is no tracker at all</li>
+        </ul>
+    </div>
+
+    <div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="color: #92400e; margin-top: 5px;">From File Sharing to Ad Counting</h3>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">BitTorrent solves a file-sharing problem: how do you download a file from thousands of strangers without trusting any single server? The same question applies in 2032 to ad view counts.</p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">In 2032, web hosts report how many times their users saw a given ad. Advertisers pay based on those numbers. The problem: hosts have a financial incentive to lie and inflate their counts. There is no trusted central authority to verify them.</p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The solution your network builds is the same instinct BitTorrent uses - make every node check every other node. Your node will:</p>
+        <ul style="color: #1e293b; font-size: 15px; line-height: 2.0; margin-left: 20px;">
+            <li>Discover peers through gossip (no tracker required)</li>
+            <li>Monitor liveness through heartbeats (PING / PONG)</li>
+            <li>Enforce cooperation through choking (just like BitTorrent)</li>
+            <li>Detect liars through reputation-weighted auditing (this is the 2032 twist)</li>
+        </ul>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The protocol is different - messages carry view counts and audit results instead of file pieces - but the architecture is the same. You are building a P2P network where the nodes police each other.</p>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <div
+        style="background-color: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">P2P Project:
+            Build a Decentralized Ad Counting Network</h2>
+        <p style="color: #1e293b; font-size: 16px; line-height: 1.6;">In Track 1, you built a pub/sub system where a
+            central broker delivered messages. In this project, you will remove the broker entirely and build a
+            peer-to-peer network where nodes communicate directly, discover each other through gossip, monitor liveness,
+            enforce cooperation, and agree on the truth through reputation-weighted voting.</p>
+        <p style="color: #1e293b; font-size: 16px; line-height: 1.6;"><strong style="color: #1e40af;">You will write
+                your node in any language you choose.</strong> The only contract is the JSON message protocol over SQS.
+            Your node must interoperate with your classmates' nodes and with the instructor bots that are always running
+            on the network.</p>
+    </div>
+
+    <div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
+        <h4 style="color: #92400e; margin-top: 5px;">AWS Credentials</h4>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Your AWS access key and secret key are posted on the <strong>main Canvas page for this week</strong>. You will need them to run the Protocol Lab notebook and to run your node in Phase 3. Do not share them publicly.</p>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">How This Project
+        Works</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">This project has three phases. Each phase builds on
+        the previous one.</p>
+
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+        <thead>
+            <tr style="background-color: #f1f5f9;">
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Phase</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">What You Do</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Where</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong
+                        style="color: #1e40af;">Phase 1: Read/Discuss</strong></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Understand why pub/sub breaks and
+                    what a P2P node needs</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">4 reading pages (below)</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong
+                        style="color: #1e40af;">Phase 2: Explore</strong></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Run simulations, learn the
+                    protocol, build intuition</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">2 Colab notebooks</td>
+            </tr>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong
+                        style="color: #1e40af;">Phase 3: Build</strong></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Write your own P2P node that runs
+                    on the live network</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Your machine, any language</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Phase 1: Read</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Read these four pages in order. They take you from
+        what you already know (pub/sub) to what you need to build (a P2P node).</p>
+
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+        <thead>
+            <tr style="background-color: #f1f5f9;">
+                <th style="padding: 12px; text-align: center; border: 1px solid #cbd5e1; color: #1e40af; width: 40px;">#
+                </th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Page</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">What You Learn
+                </th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; text-align: center; font-weight: bold;">
+                    1</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><a
+                        href="p2p-00-recap.html"
+                        style="color: #1e40af; text-decoration: none; font-weight: bold;">What Pub/Sub Gave Us</a></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Recap of decoupling, fan-out, and
+                    async processing. What worked well and what assumptions pub/sub makes.</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; text-align: center; font-weight: bold;">
+                    2</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><a
+                        href="p2p-01-breaks.html"
+                        style="color: #1e40af; text-decoration: none; font-weight: bold;">Where Pub/Sub Breaks for
+                        2032</a></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">The four problems: single point of
+                    failure, no transparency, no auditing, trust is assumed. Why we need something different.</td>
+            </tr>
+            <tr>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; text-align: center; font-weight: bold;">
+                    3</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><a
+                        href="p2p-02-node.html"
+                        style="color: #1e40af; text-decoration: none; font-weight: bold;">What a P2P Node Needs to
+                        Be</a></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">The five-layer node architecture:
+                    discovery (gossip), liveness (heartbeat), incentives (choking), trust (reputation), and application
+                    (2032 host).</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; text-align: center; font-weight: bold;">
+                    4</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><a
+                        href="p2p-03-protocol.html"
+                        style="color: #1e40af; text-decoration: none; font-weight: bold;">P2P Message Protocol
+                        Reference</a></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">The full JSON protocol: all 8
+                    message types, their fields, and when each is used. This is the spec your node must implement.</td>
+            </tr>
+            <tr>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; text-align: center; font-weight: bold;">
+                    5</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><a
+                        href="p2p-04-sqs.html"
+                        style="color: #1e40af; text-decoration: none; font-weight: bold;">SQS as a P2P Transport</a></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">How SQS is used as the
+                    communication layer, what the transport handles for you, SQS constraints (at-least-once delivery,
+                    no ordering, polling latency), and what communication topics we skip in this project.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Phase 2: Explore
+    </h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Complete these two Colab notebooks <strong>in
+            order</strong> before building your node. Run every cell. Answer the embedded questions. Each notebook opens
+        directly in Google Colab.</p>
+
+    <h3 style="color: #1d4ed8; margin-top: 25px;">Notebook 1 (do this first): P2P Protocol Lab</h3>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">This notebook teaches you the protocol your node must
+        speak. You will build all 8 JSON message types, send them to your own SQS queue (echo pattern), read them back,
+        and then send messages to classmates' queues. <strong>This uses your live AWS credentials.</strong></p>
+
+    <p style="margin: 15px 0;">
+        <a href="https://colab.research.google.com/github/gsaluncf/publicfiles/blob/main/distributedforcs2026/week4/p2p_protocol_lab.ipynb"
+            style="display: inline-block; background-color: #1e40af; color: #ffffff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: bold;" target="_blank">Open
+            Protocol Lab in Colab</a>
+        <span style="color: #64748b; font-size: 13px; margin-left: 10px;"></span>
+    </p>
+
+    <h3 style="color: #1d4ed8; margin-top: 25px;">Notebook 2 (do this second): P2P Algorithm Labs</h3>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">This notebook teaches you the algorithms your node
+        must implement. You will simulate gossip convergence, tune heartbeat thresholds, watch free-riders get choked,
+        and detect liars through reputation scoring. <strong>No AWS needed</strong> - everything runs as a local
+        simulation. 13 questions are embedded throughout.</p>
+
+    <p style="margin: 15px 0;">
+        <a href="https://colab.research.google.com/github/gsaluncf/publicfiles/blob/main/distributedforcs2026/week4/p2p_algorithm_labs.ipynb"
+            style="display: inline-block; background-color: #1e40af; color: #ffffff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: bold;"  target="_blank">Open
+            Algorithm Labs in Colab</a>
+        <span style="color: #64748b; font-size: 13px; margin-left: 10px;"> </span>
+    </p>
+
+    <div
+        style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
+        <h4 style="color: #92400e; margin-top: 5px;">Do Not Skip Phase 2</h4>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">These notebooks build the intuition you need for
+            Phase 3. If you skip them, you will not understand why your gossip protocol is not converging or why your
+            reputation system is not detecting the lying bot. Do the Protocol Lab first - it teaches the SQS mechanics.
+            Then do the Algorithm Labs - it teaches the algorithms you will wire into your node.</p>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Phase 3: Build
+        Your Node</h2>
+
+    <p style="color: #1e293b; font-size: 16px; line-height: 1.6;">This is the assignment. You will build a P2P node that
+        runs on your machine and participates in the class network.</p>
+
+    <!-- GitHub download box -->
+    <div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="color: #1e40af; margin-top: 5px;">Step 0: Get the Starter Code</h3>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Download the starter kit from GitHub. It contains everything
+            you need: the SQS transport layer, the message protocol, config, queue URLs, and shells for every module you
+            will implement.</p>
+        <p style="margin: 15px 0;">
+            <a href="https://github.com/gsaluncf/DistributedForCS2026/tree/main/project1"
+                style="display: inline-block; background-color: #1e40af; color: #ffffff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: bold;"
+                target="_blank">View project1/ on GitHub</a>
+            <a href="https://github.com/gsaluncf/DistributedForCS2026/archive/refs/heads/main.zip"
+                style="display: inline-block; background-color: #3b82f6; color: #ffffff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: bold; margin-left: 10px;"
+                target="_blank">Download ZIP</a>
+        </p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">After downloading, put the
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">project1/</code>
+            folder somewhere on your machine and open a terminal there. Then install the one dependency:</p>
+        <div style="background-color: #1e293b; color: #e2e8f0; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+            <pre style="margin: 0;">pip install boto3</pre>
+        </div>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Then set your AWS credentials (same ones you used in the Protocol Lab notebook):</p>
+        <div style="background-color: #1e293b; color: #e2e8f0; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+            <pre style="margin: 0;"># Windows (PowerShell)
+$env:AWS_ACCESS_KEY_ID     = "your-access-key"
+$env:AWS_SECRET_ACCESS_KEY = "your-secret-key"
+$env:AWS_DEFAULT_REGION    = "us-east-1"
+
+# Mac / Linux
+export AWS_ACCESS_KEY_ID="your-access-key"
+export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export AWS_DEFAULT_REGION="us-east-1"</pre>
+        </div>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Quick sanity check</strong> - run this before writing any code.
+            If it prints a JSON message dict, your environment is set up correctly:</p>
+        <div style="background-color: #1e293b; color: #e2e8f0; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+            <pre style="margin: 0;">python -c "import protocol; print(protocol.ping('hugo', seq=1))"</pre>
+        </div>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <!-- Step-by-step build guide -->
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Build Order</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Work through these steps in order. Each one has a checkpoint so you know it is
+        working before you move on. Do not skip ahead - each step depends on the previous one being correct.</p>
+
+    <!-- Step 1 -->
+    <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-left: 4px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="color: #1e40af; margin-top: 5px;">Step 1: Implement GossipNode</h3>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Open
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">algorithms/gossip.py</code>.
+            Implement the five methods:
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">add_peer</code>,
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">get_peer_list_message</code>,
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">receive_peer_list</code>,
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">age_entries</code>, and
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">pick_gossip_target</code>.
+        </p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Each method has a docstring explaining exactly what it should do. The key idea:
+            a gossip node keeps a dict of known peers, merges incoming lists into it, and ages entries out over time.</p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Checkpoint 1:</strong> Paste this into a Python shell and verify the output makes sense:</p>
+        <div style="background-color: #1e293b; color: #e2e8f0; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+            <pre style="margin: 0;">from algorithms.gossip import GossipNode
+g = GossipNode("hugo")
+g.add_peer("bot-alpha", "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-bot-alpha-p2p")
+g.add_peer("sam", "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-sam-p2p")
+print("Known:", g.known_peer_count())                    # should print 2
+print("Target:", g.pick_gossip_target())                 # should print bot-alpha or sam
+print("Message:", g.get_peer_list_message())             # should be a list of 2 dicts
+g.receive_peer_list([{"node_id": "phin", "queue_url": "..."}], sender_id="bot-alpha")
+print("After merge:", g.known_peer_count())              # should print 3</pre>
+        </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-left: 4px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="color: #1e40af; margin-top: 5px;">Step 2: Implement HeartbeatNode</h3>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Open
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">algorithms/heartbeat.py</code>.
+            Implement
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">add_peer</code>,
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">send_pings</code>,
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">receive_pong</code>,
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">record_miss</code>, and the three
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">get_*_peers</code> methods.
+        </p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The state machine is: ALIVE after missing
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">grace_period</code>
+            rounds becomes SUSPECT, and after
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">miss_threshold</code>
+            rounds becomes DEAD. A PONG at any point resets the peer back to ALIVE.</p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Checkpoint 2:</strong></p>
+        <div style="background-color: #1e293b; color: #e2e8f0; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+            <pre style="margin: 0;">from algorithms.heartbeat import HeartbeatNode
+h = HeartbeatNode("hugo", miss_threshold=3, grace_period=2)
+h.add_peer("bot-alpha")
+h.add_peer("sam")
+pinged = h.send_pings(current_round=1)
+print("Pinged:", pinged)                       # should be ['bot-alpha', 'sam']
+h.receive_pong("bot-alpha", current_round=1)
+h.record_miss("sam", current_round=1)
+h.record_miss("sam", current_round=2)
+print("Alive:", h.get_alive_peers())           # bot-alpha
+print("Suspect:", h.get_suspect_peers())       # sam (2 misses >= grace_period=2)
+h.record_miss("sam", current_round=3)
+print("Dead:", h.get_dead_peers())             # sam (3 misses >= miss_threshold=3)</pre>
+        </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-left: 4px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="color: #1e40af; margin-top: 5px;">Step 3: Implement ChokingNode and ReputationNode</h3>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Implement
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">algorithms/choking.py</code>
+            and
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">algorithms/reputation.py</code>.
+        </p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">For choking: rank peers by how much they have contributed, unchoke the top
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">max_unchoked</code>
+            peers, and rotate one random choked peer in as an optimistic unchoke every
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">optimistic_interval</code>
+            rounds.</p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">For reputation: compute trust from accuracy (60%), uptime (30%), and reciprocity (10%).
+            The
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">weighted_majority_vote</code>
+            method is the core of the 2032 fraud detection - each peer's reported count is weighted by their trust score, and the count with the most total weight wins.</p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Checkpoint 3:</strong></p>
+        <div style="background-color: #1e293b; color: #e2e8f0; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+            <pre style="margin: 0;">from algorithms.reputation import ReputationNode
+r = ReputationNode("hugo")
+r.add_peer("bot-alpha")
+r.add_peer("bot-charlie")
+# bot-alpha is accurate, bot-charlie lies
+for _ in range(10):
+    r.record_report("bot-alpha",  was_accurate=True)
+    r.record_report("bot-charlie", was_accurate=False)
+r.update_all_scores()
+ranked = r.get_ranked_peers()
+print(ranked[0].node_id)          # should be bot-alpha (higher trust)
+print(ranked[1].node_id)          # should be bot-charlie (lower trust)
+
+# Test weighted vote: alpha says 100, charlie says 999
+result, confidence = r.weighted_majority_vote({"bot-alpha": 100, "bot-charlie": 999})
+print("Agreed:", result)          # should be 100 (alpha outweighs charlie)
+print("Confidence:", confidence)  # should be > 0.5</pre>
+        </div>
+    </div>
+
+    <!-- Step 4 -->
+    <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-left: 4px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="color: #1e40af; margin-top: 5px;">Step 4: Implement the Message Handlers in node.py</h3>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Open
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">node.py</code>.
+            The polling loop and dispatcher are already wired. You need to fill in the 8 handler methods and the 4 periodic
+            task methods. Work through them in this order:</p>
+        <ol style="color: #1e293b; font-size: 15px; line-height: 2.0;">
+            <li><strong style="color: #1e40af;">_handle_hello</strong> - register the new peer in all 4 modules and reply with a PEER_LIST</li>
+            <li><strong style="color: #1e40af;">_handle_peer_list</strong> - merge peers from gossip into heartbeat, choking, reputation</li>
+            <li><strong style="color: #1e40af;">_handle_ping / _handle_pong</strong> - reply to PINGs, update heartbeat on PONGs</li>
+            <li><strong style="color: #1e40af;">bootstrap()</strong> - send HELLO to the bots so they send you a PEER_LIST back</li>
+            <li><strong style="color: #1e40af;">_do_gossip / _do_heartbeat</strong> - use your algorithm modules to send messages</li>
+            <li><strong style="color: #1e40af;">_do_choking / _do_reputation</strong> - run periodic recalculation</li>
+            <li><strong style="color: #1e40af;">_handle_choke / _handle_unchoke / _handle_audit_result</strong> - log and update state</li>
+        </ol>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Checkpoint 4 - Connect to the live network.</strong> With the bots running, start your node and confirm it bootstraps:</p>
+        <div style="background-color: #1e293b; color: #e2e8f0; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+            <pre style="margin: 0;">python my_node.py --id hugo --verbose</pre>
+        </div>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">You should see output like this within 30 seconds:</p>
+        <div style="background-color: #f1f5f9; border: 1px solid #cbd5e1; border-left: 4px solid #3b82f6; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+            <pre style="margin: 0;">[22:05:01] [hugo] Bootstrapping via ['bot-alpha', 'bot-bravo', 'bot-charlie']...
+[22:05:01] [hugo]   HELLO -> bot-alpha
+&lt;- PEER_LIST from bot-alpha (4 entries)
+[22:05:06] [hugo]   Gossip from bot-alpha: discovered 3 new peer(s)
+[22:05:11] [hugo]   Heartbeat round 1: pinged 3 peers</pre>
+        </div>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">If you see HELLO go out but get no PEER_LIST back after 30 seconds, check your AWS credentials or email your instructor.</p>
+    </div>
+
+    <!-- Step 5 -->
+    <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-left: 4px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="color: #1e40af; margin-top: 5px;">Step 5: Add the 2032 Application Layer in my_node.py</h3>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Open
+            <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">my_node.py</code>.
+            This is your actual host node. You need to add three things on top of the base protocol node:</p>
+        <ol style="color: #1e293b; font-size: 15px; line-height: 2.0;">
+            <li><strong style="color: #1e40af;">State variables</strong> - a dict for your local view counts, and a nested dict for what you have
+                observed from other hosts: <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">{content_id: {sender: count}}</code></li>
+            <li><strong style="color: #1e40af;">_handle_view_event</strong> - call the base class version, then store the sender's count in your
+                observed dict so you have something to audit later</li>
+            <li><strong style="color: #1e40af;">_do_publish</strong> - pick a random content from your catalog, increment your local count, build
+                a VIEW_EVENT message, and send it to all alive peers</li>
+            <li><strong style="color: #1e40af;">_do_audit</strong> - find a content_id with enough observations, collect all votes, run
+                <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">self.reputation.weighted_majority_vote(votes)</code>,
+                broadcast the AUDIT_RESULT, then update reputation for each voter</li>
+        </ol>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Checkpoint 5 - Participate in auditing.</strong> After running for a few minutes you should see your node publishing and auditing:</p>
+        <div style="background-color: #f1f5f9; border: 1px solid #cbd5e1; border-left: 4px solid #3b82f6; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+            <pre style="margin: 0;">[hugo] [PUBLISH] VIEW_EVENT show:midnight-run count=142 -> 3 peers
+[hugo] [PUBLISH] VIEW_EVENT show:neon-drift count=87 -> 3 peers
+[hugo] [AUDIT] show:midnight-run: votes from 3 peers, agreed=140, confidence=0.74
+[hugo] [AUDIT] Reputation updated: bot-charlie trust=0.31 (was 0.49)</pre>
+        </div>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The key signal is
+            <strong style="color: #1e40af;">bot-charlie's trust score falling over time</strong>.
+            bot-charlie reports wrong counts 50% of the time. Your reputation system should detect this within 5-10 audit rounds and down-weight charlie accordingly.</p>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+
+
+    <h3 style="color: #1d4ed8; margin-top: 25px;">The Contract</h3>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Your node must:</p>
+
+    <ol style="color: #1e293b; font-size: 15px; line-height: 2.0;">
+        <li><strong style="color: #1e40af;">Poll its SQS queue</strong> for incoming messages</li>
+        <li><strong style="color: #1e40af;">Handle all 8 message types</strong> defined in the <a
+                href="p2p-03-protocol.html"
+                style="color: #1e40af;">Protocol Reference</a></li>
+        <li><strong style="color: #1e40af;">Bootstrap via HELLO</strong> - send a HELLO to a known bot, receive a
+            PEER_LIST back</li>
+        <li><strong style="color: #1e40af;">Gossip</strong> - periodically share your peer list with a random peer</li>
+        <li><strong style="color: #1e40af;">Heartbeat</strong> - send PINGs, respond to PINGs with PONGs, track peer
+            liveness</li>
+        <li><strong style="color: #1e40af;">Publish ViewEvents</strong> - periodically broadcast your ad view counts to
+            peers</li>
+        <li><strong style="color: #1e40af;">Audit</strong> - collect ViewEvents from peers, run a majority vote, publish
+            AUDIT_RESULTs</li>
+        <li><strong style="color: #1e40af;">Shutdown gracefully</strong> - handle Ctrl+C without leaving orphaned
+            resources</li>
+    </ol>
+
+    <h3 style="color: #1d4ed8; margin-top: 25px;">Language: Your Choice</h3>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">You may write your node in <strong
+            style="color: #1e40af;">any programming language</strong>. Python, Rust, Go, JavaScript, Java -- whatever
+        you are comfortable with. The only requirement is that your node speaks the JSON protocol over SQS. A Python
+        reference skeleton is provided below. If you choose another language, you will need your
+        language's SQS client library (Rust: <code
+            style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">aws-sdk-sqs</code>,
+        Go: <code
+            style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">aws-sdk-go-v2/service/sqs</code>,
+        JS: <code
+            style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">@aws-sdk/client-sqs</code>).
+    </p>
+
+    <h3 style="color: #1d4ed8; margin-top: 25px;">The Network</h3>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The network has 9 nodes:</p>
+
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+        <thead>
+            <tr style="background-color: #f1f5f9;">
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Node</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Type</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Queue Name</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">hugo, sam, phin, manuel, bruno
+                </td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Student</td>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">
+                    ds2032-node-{name}-p2p</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Your classmates. Each runs their
+                    own node.</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">gil</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Instructor</td>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">
+                    ds2032-node-gil-p2p</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Instructor node.</td>
+            </tr>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">bot-alpha</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Bot</td>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">
+                    ds2032-node-bot-alpha-p2p</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>95% accuracy.</strong>
+                    Reliable bootstrap node. Send your first HELLO here.</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">bot-bravo</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Bot</td>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">
+                    ds2032-node-bot-bravo-p2p</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>80% accuracy.</strong>
+                    Mostly reliable.</td>
+            </tr>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">bot-charlie</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Bot</td>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">
+                    ds2032-node-bot-charlie-p2p</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>50% accuracy.</strong>
+                    Reports wrong view counts half the time. Your reputation system should detect this.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div
+        style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
+        <h4 style="color: #92400e; margin-top: 5px;">bot-charlie is the test</h4>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">If your node gives bot-charlie the same voting
+            weight as bot-alpha, your reputation system is not working. After enough rounds, bot-charlie's trust score
+            should be noticeably lower than the honest bots, and its vote should carry less weight in audit decisions.
+        </p>
+    </div>
+
+    <h3 style="color: #1d4ed8; margin-top: 25px;">Content Catalog</h3>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">For auditing to work, multiple nodes need to report on
+        the <strong>same content</strong>. The table below lists the shows and ad slots that the bots use. Your node
+        should report on these too, so there is enough overlap for cross-checking.</p>
+
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+        <thead>
+            <tr style="background-color: #f1f5f9;">
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">content_id</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">ad_ids</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Coverage</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 13px; color: #1e293b;">
+                    show:midnight-run</td>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 13px; color: #1e293b;">
+                    ad-1, ad-2, ad-3</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>All nodes</strong></td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 13px; color: #1e293b;">
+                    show:neon-drift</td>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 13px; color: #1e293b;">
+                    ad-4, ad-5</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>All nodes</strong></td>
+            </tr>
+            <tr>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 13px; color: #1e293b;">
+                    show:binary-sunset</td>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 13px; color: #1e293b;">
+                    ad-6, ad-7</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>All nodes</strong></td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 13px; color: #64748b;">
+                    show:echo-valley</td>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 13px; color: #64748b;">
+                    ad-8, ad-9</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #64748b;">Optional (bots may report)</td>
+            </tr>
+            <tr>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 13px; color: #64748b;">
+                    show:ghost-protocol</td>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 13px; color: #64748b;">
+                    ad-10</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #64748b;">Optional (bots may report)</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">You can also add your own content_ids -- maybe you
+        want to track <code
+            style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">show:my-cool-show</code>.
+        That is fine. But only other students who also track it can cross-check your counts. The bots will not know
+        about it. For auditing to produce useful results, you must report on at least the three common shows above.</p>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">What Your Node
+        Should Do (Step by Step)</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">When you start your node, it should follow this
+        sequence:</p>
+
+    <div style="text-align: center; margin: 20px 0;">
+        <svg viewBox="0 0 700 420" style="max-width: 680px; width: 100%; height: auto; font-family: Arial, sans-serif;">
+            <defs>
+                <marker id="arrowP" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6" />
+                </marker>
+            </defs>
+
+            <!-- Step 1: Bootstrap -->
+            <rect x="200" y="10" width="300" height="45" rx="8" fill="#1e40af" stroke="#1e3a8a" stroke-width="2" />
+            <text x="350" y="28" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="bold">1. Send HELLO to
+                bot-alpha</text>
+            <text x="350" y="43" text-anchor="middle" fill="#93c5fd" font-size="10">Include your queue_url</text>
+            <line x1="350" y1="55" x2="350" y2="75" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowP)" />
+
+            <!-- Step 2: Receive peers -->
+            <rect x="200" y="80" width="300" height="45" rx="8" fill="#3b82f6" stroke="#2563eb" stroke-width="2" />
+            <text x="350" y="98" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="bold">2. Receive
+                PEER_LIST back</text>
+            <text x="350" y="113" text-anchor="middle" fill="#dbeafe" font-size="10">Merge new peers into your
+                list</text>
+            <line x1="350" y1="125" x2="350" y2="145" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowP)" />
+
+            <!-- Step 3: Poll loop -->
+            <rect x="150" y="150" width="400" height="45" rx="8" fill="#60a5fa" stroke="#3b82f6" stroke-width="2" />
+            <text x="350" y="168" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="bold">3. Enter main
+                loop: poll queue, dispatch messages</text>
+            <text x="350" y="183" text-anchor="middle" fill="#1e40af" font-size="10">Handle HELLO, PEER_LIST, PING,
+                PONG, VIEW_EVENT, AUDIT_RESULT, CHOKE, UNCHOKE</text>
+            <line x1="350" y1="195" x2="350" y2="215" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowP)" />
+
+            <!-- Step 4: Periodic tasks -->
+            <rect x="100" y="220" width="240" height="55" rx="8" fill="#93c5fd" stroke="#60a5fa" stroke-width="2" />
+            <text x="220" y="240" text-anchor="middle" fill="#1e293b" font-size="11" font-weight="bold">4a. Every ~15s:
+                Gossip</text>
+            <text x="220" y="255" text-anchor="middle" fill="#1e40af" font-size="10">Share peers with a random
+                node</text>
+            <text x="220" y="268" text-anchor="middle" fill="#1e40af" font-size="10">Age stale entries</text>
+
+            <rect x="360" y="220" width="240" height="55" rx="8" fill="#93c5fd" stroke="#60a5fa" stroke-width="2" />
+            <text x="480" y="240" text-anchor="middle" fill="#1e293b" font-size="11" font-weight="bold">4b. Every ~10s:
+                Heartbeat</text>
+            <text x="480" y="255" text-anchor="middle" fill="#1e40af" font-size="10">PING all active peers</text>
+            <text x="480" y="268" text-anchor="middle" fill="#1e40af" font-size="10">Detect SUSPECT / DEAD</text>
+
+            <line x1="350" y1="275" x2="350" y2="295" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowP)" />
+
+            <!-- Step 5: Application -->
+            <rect x="100" y="300" width="240" height="55" rx="8" fill="#dbeafe" stroke="#93c5fd" stroke-width="2" />
+            <text x="220" y="320" text-anchor="middle" fill="#1e40af" font-size="11" font-weight="bold">5a. Every ~15s:
+                Publish ViewEvent</text>
+            <text x="220" y="335" text-anchor="middle" fill="#3b82f6" font-size="10">Broadcast your view counts</text>
+            <text x="220" y="348" text-anchor="middle" fill="#3b82f6" font-size="10">to all known peers</text>
+
+            <rect x="360" y="300" width="240" height="55" rx="8" fill="#dbeafe" stroke="#93c5fd" stroke-width="2" />
+            <text x="480" y="320" text-anchor="middle" fill="#1e40af" font-size="11" font-weight="bold">5b. Every ~45s:
+                Audit</text>
+            <text x="480" y="335" text-anchor="middle" fill="#3b82f6" font-size="10">Majority vote on collected
+                counts</text>
+            <text x="480" y="348" text-anchor="middle" fill="#3b82f6" font-size="10">Weighted by reputation</text>
+
+            <!-- Loop arrow -->
+            <path d="M 600 310 Q 660 250 600 190 Q 580 175 550 175" fill="none" stroke="#94a3b8" stroke-width="1.5"
+                stroke-dasharray="5,3" marker-end="url(#arrowP)" />
+            <text x="660" y="245" fill="#94a3b8" font-size="10" font-style="italic">repeat</text>
+
+            <!-- Bottom: Ctrl+C -->
+            <rect x="200" y="380" width="300" height="30" rx="5" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1" />
+            <text x="350" y="400" text-anchor="middle" fill="#64748b" font-size="11">Ctrl+C: graceful shutdown</text>
+        </svg>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Deliverables</h2>
+
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+        <thead>
+            <tr style="background-color: #f1f5f9;">
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">#</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Deliverable</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">What to Submit
+                </th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-weight: bold;">1</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Your node source
+                        code</strong></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">All source files for your P2P
+                    node. Include a README that explains how to run it.</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-weight: bold;">2</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Completed Colab
+                        notebooks</strong></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Both notebooks with all cells run
+                    and all questions answered in your own words.</td>
+            </tr>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-weight: bold;">3</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Live
+                        demonstration</strong></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">During class, run your node and
+                    show it interoperating with the bots and at least one classmate's node. Your node should discover
+                    peers, exchange heartbeats, and participate in audits.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Evaluation
+        Criteria</h2>
+
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+        <thead>
+            <tr style="background-color: #f1f5f9;">
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Criterion</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">What We Look For
+                </th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Interoperability</strong>
+                </td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Does your node correctly exchange
+                    messages with bots and classmates? Does it follow the protocol spec?</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Peer Discovery</strong>
+                </td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Does gossip work? After starting
+                    with one bootstrap node, does your node eventually discover all active peers?</td>
+            </tr>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Liveness
+                        Detection</strong></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Does your node detect when a peer
+                    goes offline? Does it distinguish between slow and dead?</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Trust and
+                        Auditing</strong></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Does your node track peer
+                    reputation? Does bot-charlie get a lower trust score? Do audit results reflect weighted voting?</td>
+            </tr>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Understanding</strong>
+                </td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Do your Colab answers
+                    show that you understand why the algorithms work, not just that they do?</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Setup</h2>
+
+    <h3 style="color: #1d4ed8; margin-top: 25px;">Install boto3</h3>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><code
+            style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">boto3</code>
+        is the AWS SDK for Python. It is how your code talks to SQS queues -- sending messages, receiving messages,
+        deleting messages. If you are using Python, install it:</p>
+
+    <div
+        style="background-color: #1e293b; color: #e2e8f0; padding: 12px 15px; border-radius: 8px; margin: 15px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+        <pre style="margin: 0;">pip install boto3</pre>
+    </div>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">If you are using another language, install that
+        language's SQS client library (listed in the Language section above).</p>
+
+    <h3 style="color: #1d4ed8; margin-top: 25px;">AWS Credentials</h3>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">SQS queues require authentication. Your instructor
+        will give you an <strong>Access Key ID</strong> and a <strong>Secret Access Key</strong>. These are the same
+        credentials you used in the pub/sub lab and the Protocol Lab notebook.</p>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">To configure them on your machine, set these
+        environment variables before running your node:</p>
+
+    <div
+        style="background-color: #1e293b; color: #e2e8f0; padding: 12px 15px; border-radius: 8px; margin: 15px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+        <pre style="margin: 0;"># Windows (PowerShell)
+$env:AWS_ACCESS_KEY_ID = "your-access-key"
+$env:AWS_SECRET_ACCESS_KEY = "your-secret-key"
+$env:AWS_DEFAULT_REGION = "us-east-1"
+
+# Mac/Linux
+export AWS_ACCESS_KEY_ID="your-access-key"
+export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export AWS_DEFAULT_REGION="us-east-1"</pre>
+    </div>
+
+    <h3 style="color: #1d4ed8; margin-top: 25px;">The Bots</h3>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">There should always be at least one instructor bot on
+        the network (<strong>bot-alpha</strong>). The bots respond to your HELLO, participate in gossip, publish
+        VIEW_EVENTs, and respond to PINGs. They are your test harness -- if your node can bootstrap, discover peers, and
+        exchange messages with the bots, it is working.</p>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">If you send a HELLO to bot-alpha and get nothing back
+        after 30 seconds, email your instructor.</p>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Getting Started
+    </h2>
+
+    <div
+        style="background-color: #d1fae5; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin: 20px 0;">
+        <h4 style="color: #059669; margin-top: 5px;">Before you write any code:</h4>
+        <ol style="color: #1e293b; font-size: 15px; line-height: 2.0;">
+            <li>Complete the <strong>Protocol Lab</strong> notebook (Phase 2, Notebook 1)</li>
+            <li>Complete the <strong>Algorithm Labs</strong> notebook (Phase 2, Notebook 2)</li>
+            <li>Install <code
+                    style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">boto3</code>
+                on your machine: <code
+                    style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">pip install boto3</code>
+            </li>
+            <li>Configure your AWS credentials (see Setup section above)</li>
+        </ol>
+
+        <h4 style="color: #059669; margin-top: 15px;">Then build your node:</h4>
+        <ol style="color: #1e293b; font-size: 15px; line-height: 2.0;">
+            <li>Download the <a href="https://github.com/gsaluncf/DistributedForCS2026/tree/main/project1" style="color: #059669;" target="_blank">project1/ starter kit</a> from GitHub. Follow the Build Order steps above.</li>
+            <li>Run it. You should see <code
+                    style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">[SEND] HELLO -&gt; bot-alpha</code>
+                and then <code
+                    style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">[RECV] PEER_LIST from bot-alpha</code>
+                with a growing peer list</li>
+            <li>Once bootstrap works, add heartbeat -- you should see PONGs coming back</li>
+            <li>Then implement <code
+                    style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">publish_view</code>
+                -- the bots will start receiving your VIEW_EVENTs</li>
+            <li>Then implement <code
+                    style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">audit</code>
+                -- compare your counts against the bots' VIEW_EVENTs</li>
+            <li>Finally, check that bot-charlie's reputation score is lower than bot-alpha's. If it is, your reputation
+                system works.</li>
+        </ol>
+
+        <h4 style="color: #059669; margin-top: 15px;">Keep the <a
+                href="p2p-03-protocol.html"
+                style="color: #059669;">Protocol Reference</a> open while you code.</h4>
+    </div>
+
+</body>
+
+</html>

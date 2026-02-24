@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>What a P2P Node Needs to Be</title>
+</head>
+
+<body>
+
+    <div
+        style="background-color: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">What a P2P
+            Node Needs to Be</h2>
+        <p style="color: #1e293b; font-size: 16px; line-height: 1.6;">Without a central broker, every node must handle
+            responsibilities that the broker used to manage. This page defines the five capabilities every P2P node
+            needs, and introduces the algorithm behind each one.</p>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">The Five Layers of
+        a P2P Node</h2>
+
+    <div
+        style="background-color: #f3f4f6; border: 1px dashed #9ca3af; border-radius: 8px; padding: 15px; margin: 20px 0;">
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">A note on this
+                model:</strong> The five-layer stack below is a <strong>conceptual framework designed for this
+                course</strong>, not a published industry standard. There is no "official" P2P layer model the way there
+            is an OSI model for networking. However, every individual algorithm in the stack is real, well-documented,
+            and used in production systems (Cassandra's gossip, BitTorrent's choking, EigenTrust's reputation scoring,
+            etc.). We organize them into layers here because it makes the dependencies between these algorithms clear:
+            discovery feeds liveness, liveness feeds incentives, incentives feed trust, and trust feeds the application.
+            This layering gives you a structured way to build and reason about a complex P2P system one piece at a time.
+        </p>
+    </div>
+
+    <div style="text-align: center; margin: 20px 0;">
+        <svg viewBox="0 0 700 340" style="max-width: 680px; width: 100%; height: auto; font-family: Arial, sans-serif;">
+            <!-- Layer 5: Application (Host) -->
+            <rect x="100" y="10" width="500" height="50" rx="8" fill="#1e40af" stroke="#1e3a8a" stroke-width="2" />
+            <text x="350" y="30" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="bold">Layer 5:
+                Application (2032 Host)</text>
+            <text x="350" y="47" text-anchor="middle" fill="#93c5fd" font-size="11">ViewEvents, Auditing, Billing</text>
+
+            <!-- Layer 4: Trust -->
+            <rect x="100" y="70" width="500" height="50" rx="8" fill="#3b82f6" stroke="#2563eb" stroke-width="2" />
+            <text x="350" y="90" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="bold">Layer 4:
+                Trust</text>
+            <text x="350" y="107" text-anchor="middle" fill="#dbeafe" font-size="11">Reputation Scoring, Weighted
+                Voting</text>
+
+            <!-- Layer 3: Incentives -->
+            <rect x="100" y="130" width="500" height="50" rx="8" fill="#60a5fa" stroke="#3b82f6" stroke-width="2" />
+            <text x="350" y="150" text-anchor="middle" fill="#1e293b" font-size="14" font-weight="bold">Layer 3:
+                Incentives</text>
+            <text x="350" y="167" text-anchor="middle" fill="#1e40af" font-size="11">Choking/Unchoking,
+                Reciprocity</text>
+
+            <!-- Layer 2: Liveness -->
+            <rect x="100" y="190" width="500" height="50" rx="8" fill="#93c5fd" stroke="#60a5fa" stroke-width="2" />
+            <text x="350" y="210" text-anchor="middle" fill="#1e293b" font-size="14" font-weight="bold">Layer 2:
+                Liveness</text>
+            <text x="350" y="227" text-anchor="middle" fill="#1e40af" font-size="11">Heartbeat PING/PONG, Failure
+                Detection</text>
+
+            <!-- Layer 1: Discovery -->
+            <rect x="100" y="250" width="500" height="50" rx="8" fill="#dbeafe" stroke="#93c5fd" stroke-width="2" />
+            <text x="350" y="270" text-anchor="middle" fill="#1e40af" font-size="14" font-weight="bold">Layer 1:
+                Discovery</text>
+            <text x="350" y="287" text-anchor="middle" fill="#3b82f6" font-size="11">Gossip Protocol, Peer List
+                Exchange</text>
+
+            <!-- Transport -->
+            <rect x="100" y="310" width="500" height="24" rx="5" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1" />
+            <text x="350" y="327" text-anchor="middle" fill="#64748b" font-size="11">Transport: SQS Standard Queues (one
+                per node)</text>
+        </svg>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Layer 1: Discovery
+        (Gossip Protocol)</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Without a central registry, nodes must discover each
+        other. The <strong style="color: #1e40af;">gossip protocol</strong> solves this: every node maintains a list of
+        known peers. Periodically, it picks a random peer and exchanges lists. New peers spread through the network like
+        a rumor.</p>
+
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+        <thead>
+            <tr style="background-color: #f1f5f9;">
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Property</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Gossip</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Algorithm</strong></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Random peer-list exchange</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Messages</strong></td>
+                <td
+                    style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">
+                    HELLO, PEER_LIST</td>
+            </tr>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Convergence</strong></td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">O(log N) rounds for N nodes</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Real-world use</strong>
+                </td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Cassandra, Consul, SWIM protocol
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Layer 2: Liveness
+        (Heartbeat)</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Once you know your peers, you need to know which ones
+        are still alive. The <strong style="color: #1e40af;">heartbeat protocol</strong> sends periodic <code
+            style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">PING</code>
+        messages. If a peer does not respond with a <code
+            style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">PONG</code>
+        within a threshold, it is marked <strong>SUSPECT</strong> and eventually <strong>DEAD</strong>.</p>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The hard part: distinguishing a dead peer from a slow
+        one. If your threshold is too aggressive, you will declare alive peers dead (false positive). Too conservative,
+        and a crashed peer stays in your active list for too long.</p>
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Layer 3:
+        Incentives (Choking)</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">In a decentralized system, why should any node
+        cooperate? The <strong style="color: #1e40af;">choking/unchoking</strong> mechanism (from BitTorrent) enforces
+        reciprocity: you serve peers who serve you back. Free-riders who never contribute get choked (cut off from
+        service).</p>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Optimistic
+            unchoking</strong> prevents the "cold start" problem: periodically, one random choked peer gets a chance to
+        prove itself. Without this, new peers could never join the cooperative group.</p>
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Layer 4: Trust
+        (Reputation)</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Choking handles the "they give, I give" problem. But
+        what about lying? A peer could contribute plenty of data while reporting false view counts. <strong
+            style="color: #1e40af;">Reputation scoring</strong> tracks multiple metrics per peer:</p>
+
+    <ul style="color: #1e293b; font-size: 15px; line-height: 1.8;">
+        <li><strong>Accuracy</strong>: Do their reports match the majority?</li>
+        <li><strong>Uptime</strong>: Do they respond to heartbeats consistently?</li>
+        <li><strong>Reciprocity</strong>: Do they contribute data, not just consume?</li>
+    </ul>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The resulting trust score weights their vote in audit
+        decisions. A peer with 95% accuracy has far more influence than one with 50%.</p>
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Layer 5:
+        Application (The 2032 Host)</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">On top of the four infrastructure layers sits your
+        application: the 2032 host site. It generates ViewEvents (ad view counts), broadcasts them to peers, collects
+        reports from other hosts, and runs <strong style="color: #1e40af;">reputation-weighted majority votes</strong>
+        to agree on the truth.</p>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <div
+        style="background-color: #d1fae5; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin: 20px 0;">
+        <h4 style="color: #059669; margin-top: 5px;">The Layered Approach</h4>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Each layer solves exactly one problem and hands
+            its output to the layer above. Discovery tells liveness who to monitor. Liveness tells incentives who is
+            alive. Incentives tell trust who is contributing. Trust tells the application whose votes to weight. You
+            will build each layer separately in the algorithm modules, then wire them together in your node
+            implementation.</p>
+    </div>
+
+    <div
+        style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+        <h3 style="color: #1d4ed8; margin-top: 5px;">Think About</h3>
+        <ul style="color: #1e293b; font-size: 15px; line-height: 1.8;">
+            <li>What happens if the gossip layer fails - can the heartbeat layer still function?</li>
+            <li>If a peer has high uptime but low accuracy, should reputation weight its audit vote highly?</li>
+            <li>BitTorrent's optimistic unchoking gives free-riders a chance every 30 seconds. Is 30 seconds the right
+                interval for an ad counting system? What would change that number?</li>
+        </ul>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Architecture in Context</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The five-layer node you are building sits at the intersection of two
+        architectural patterns: <strong style="color: #1e40af;">peer-to-peer architecture</strong> and
+        <strong style="color: #1e40af;">multi-tier architecture</strong>. They sound like opposites, but this project is both at once.</p>
+
+    <h3 style="color: #1d4ed8; margin-top: 25px;">Why This Is P2P</h3>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">A system is peer-to-peer when <strong>every node plays both client and server</strong>.
+        There is no node that is only a receiver or only a provider. In your 2032 network:</p>
+    <ul style="color: #1e293b; font-size: 15px; line-height: 2.0; margin-left: 20px;">
+        <li>Your node <strong>sends</strong> HELLO and <strong>receives</strong> PEER_LIST — initiator and responder</li>
+        <li>Your node <strong>sends</strong> PING and <strong>receives</strong> PING — monitors others and is monitored</li>
+        <li>Your node <strong>publishes</strong> ViewEvents and <strong>observes</strong> ViewEvents from peers</li>
+        <li>Your node <strong>audits</strong> others and <strong>is audited</strong> by others</li>
+    </ul>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">There is no dedicated audit server, no central peer registry, no master node.
+        Adding a new node requires no administrator — it sends a HELLO and the gossip protocol does the rest.
+        That self-organizing behavior is the defining characteristic of a P2P system.</p>
+
+    <div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
+        <h4 style="color: #92400e; margin-top: 5px;">P2P vs. Client-Server: The Spectrum</h4>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Pure P2P and pure client-server are the two ends of a spectrum. Most real systems are somewhere in the middle.
+            BitTorrent uses a central tracker to bootstrap. Your 2032 network uses instructor-run bots as stable bootstrap nodes —
+            a mild centralization. Without them, a cold-starting node has no way to find anyone. Three dedicated bootstrap nodes
+            is a pragmatic compromise between P2P purity and operational reliability.</p>
+    </div>
+
+    <h3 style="color: #1d4ed8; margin-top: 25px;">Why This Is Also Multi-Tier</h3>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Multi-tier architecture is about <strong>separating concerns across layers</strong> so that each layer
+        only depends on the one below it. Your node's five layers have exactly this structure —
+        a multi-tier architecture running entirely inside a single process on each peer:</p>
+
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+        <thead>
+            <tr style="background-color: #f1f5f9;">
+                <th style="padding: 10px 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Layer</th>
+                <th style="padding: 10px 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Responsibility</th>
+                <th style="padding: 10px 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Web Equivalent</th>
+                <th style="padding: 10px 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Only Needs...</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>5 – Application</strong></td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">ViewEvents, auditing, billing</td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Presentation / business logic</td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Trust scores from Layer 4</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>4 – Trust</strong></td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Reputation, weighted votes</td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Business logic</td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Contribution data from Layer 3</td>
+            </tr>
+            <tr>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>3 – Incentives</strong></td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Choking, reciprocity</td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Middleware / access control</td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Alive peers from Layer 2</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>2 – Liveness</strong></td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Heartbeat, failure detection</td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Health monitoring / infra</td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Known peers from Layer 1</td>
+            </tr>
+            <tr>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>1 – Discovery</strong></td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Gossip, peer list exchange</td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">Service discovery / DNS</td>
+                <td style="padding: 10px 12px; border: 1px solid #cbd5e1; color: #1e293b;">The transport (SQS)</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The critical property: <strong style="color: #1e40af;">each layer is ignorant of the layers above it</strong>.
+        Your gossip module has no idea that a reputation system exists. Your heartbeat module does not know what a ViewEvent is.
+        This lets you build and test each layer in isolation — which is precisely what the project checkpoints have you do.</p>
+
+    <div style="background-color: #d1fae5; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin: 20px 0;">
+        <h4 style="color: #059669; margin-top: 5px;">The Point</h4>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong>P2P</strong> tells you <em>who talks to whom</em> — everyone, symmetrically, with no center.
+            <strong>Multi-tier</strong> tells you <em>how each participant is organized internally</em> — layered, each concern isolated.
+            Your project is P2P at the network level and multi-tier inside each node. These two patterns answer different questions about the same system.</p>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+
+    <div style="display: flex; justify-content: space-between; margin: 20px 0; padding: 10px 0;">
+        <a href="p2p-01-breaks.html"
+            style="color: #64748b; text-decoration: none; font-size: 14px;">Previous: Where Pub/Sub Breaks</a>
+        <a href="p2p-03-protocol.html"
+            style="color: #1e40af; text-decoration: none; font-size: 14px; font-weight: bold;">Next: P2P Message
+            Protocol Reference</a>
+    </div>
+
+</body>
+
+</html>

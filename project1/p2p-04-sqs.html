@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQS as a P2P Transport</title>
+</head>
+
+<body>
+
+    <div style="background-color: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">SQS as a P2P Transport</h2>
+        <p style="color: #1e293b; font-size: 16px; line-height: 1.6;">This reference page explains how AWS SQS is used
+            as the communication layer for your P2P node. Understanding the transport frees you to focus on the
+            algorithms above it. It also explains the constraints that come with SQS — things that a raw TCP
+            socket would handle differently.</p>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">The Communication Model</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">In a traditional P2P system like BitTorrent, nodes open
+        direct TCP connections to each other. Your node's IP and port are visible to peers; messages travel in real time.</p>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">This project uses a different model: <strong style="color: #1e40af;">each node
+        owns one SQS queue</strong>. Instead of opening a connection to another node, you send a message to that node's queue.
+        The receiving node polls its queue periodically and processes whatever it finds.</p>
+
+    <div style="text-align: center; margin: 25px 0;">
+        <svg viewBox="0 0 700 200" style="max-width: 680px; width: 100%; height: auto; font-family: Arial, sans-serif;">
+            <!-- Node A -->
+            <rect x="20" y="70" width="120" height="60" rx="8" fill="#1e40af" stroke="#1e3a8a" stroke-width="2"/>
+            <text x="80" y="96" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="bold">Your Node</text>
+            <text x="80" y="112" text-anchor="middle" fill="#93c5fd" font-size="11">(hugo)</text>
+
+            <!-- Arrow A→queue-B -->
+            <line x1="140" y1="100" x2="255" y2="100" stroke="#3b82f6" stroke-width="2" marker-end="url(#arr)"/>
+            <text x="198" y="90" text-anchor="middle" fill="#3b82f6" font-size="11">send()</text>
+
+            <!-- Queue B -->
+            <rect x="255" y="60" width="130" height="80" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="2"/>
+            <text x="320" y="90" text-anchor="middle" fill="#64748b" font-size="12" font-weight="bold">SQS Queue</text>
+            <text x="320" y="106" text-anchor="middle" fill="#64748b" font-size="11">ds2032-node-</text>
+            <text x="320" y="120" text-anchor="middle" fill="#64748b" font-size="11">sam-p2p</text>
+
+            <!-- Arrow queue-B→Node B -->
+            <line x1="385" y1="100" x2="500" y2="100" stroke="#3b82f6" stroke-width="2" marker-end="url(#arr)"/>
+            <text x="443" y="90" text-anchor="middle" fill="#3b82f6" font-size="11">receive() poll</text>
+
+            <!-- Node B -->
+            <rect x="500" y="70" width="120" height="60" rx="8" fill="#1e40af" stroke="#1e3a8a" stroke-width="2"/>
+            <text x="560" y="96" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="bold">Peer Node</text>
+            <text x="560" y="112" text-anchor="middle" fill="#93c5fd" font-size="11">(sam)</text>
+
+            <!-- Labels -->
+            <text x="80" y="160" text-anchor="middle" fill="#64748b" font-size="11">writes to sam's queue</text>
+            <text x="560" y="160" text-anchor="middle" fill="#64748b" font-size="11">polls its own queue</text>
+
+            <!-- Arrow marker -->
+            <defs>
+                <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                    <path d="M0,0 L0,6 L8,3 z" fill="#3b82f6"/>
+                </marker>
+            </defs>
+        </svg>
+    </div>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The key difference from direct sockets: there is a queue in between. There is no persistent connection between nodes. The sender does not wait for the receiver. The message sits in the queue until the receiver polls.</p>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">What the Transport Does For You</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">SQSTransport</code> class in
+        <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">node.py</code>
+        handles all of this. You never call the AWS SDK directly — you just use three methods:</p>
+
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+        <thead>
+            <tr style="background-color: #f1f5f9;">
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Method</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">What it does</th>
+                <th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">When to call it</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">send(node_id, msg)</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Looks up that node's queue URL, encodes the dict as JSON, puts it on SQS. Returns True/False.</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Any time you want to send a message to a peer</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">receive(my_id)</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Long-polls your own queue (up to 5 seconds), returns a list of decoded message dicts.</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Called automatically by the poll loop — you do not call this directly</td>
+            </tr>
+            <tr>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">delete(my_id, receipt)</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Removes a processed message from the queue. If you do not delete, SQS redelivers it after ~30 seconds.</td>
+                <td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Called automatically after each message is handled</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">SQS Constraints You Should Know</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">SQS is not a raw socket. It has specific behaviors that differ from typical networking. The project is designed around these constraints so you do not need to work around them, but you should understand why things work the way they do.</p>
+
+    <div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 18px; margin: 20px 0;">
+        <h4 style="color: #92400e; margin-top: 5px;">At-Least-Once Delivery</h4>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">SQS guarantees that every message is delivered <em>at least once</em>,
+            not exactly once. In rare cases, the same message may be delivered twice. Your handlers should be written to
+            tolerate this. For example, receiving the same HELLO twice should just refresh the peer entry, not crash.</p>
+    </div>
+
+    <div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 18px; margin: 20px 0;">
+        <h4 style="color: #92400e; margin-top: 5px;">No Ordering Guarantee</h4>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Standard SQS queues do <em>not</em> guarantee that messages arrive in the order they were sent.
+            A PEER_LIST could arrive before the HELLO that prompted it if network conditions vary.
+            Your handlers should not assume any particular message ordering.</p>
+    </div>
+
+    <div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 18px; margin: 20px 0;">
+        <h4 style="color: #92400e; margin-top: 5px;">Polling Latency</h4>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Your node does not receive messages instantly. The poll loop waits up to 5 seconds for a batch of messages.
+            This means there is inherent latency between when a peer sends a message and when you process it.
+            This is expected — your heartbeat and gossip intervals are calibrated around this. Do not write code
+            that assumes instant delivery.</p>
+    </div>
+
+    <div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 18px; margin: 20px 0;">
+        <h4 style="color: #92400e; margin-top: 5px;">One Queue Per Node</h4>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Every node in the class shares the same AWS account but owns exactly one queue. The queue URLs are
+            pre-provisioned and listed in <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">resources.json</code>.
+            You do not need to create or manage queues. If your queue does not exist, ask your instructor —
+            do not try to create it yourself.</p>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">What We Are Skipping (And Why)</h2>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">A full treatment of distributed communication covers topics like:</p>
+
+    <ul style="color: #1e293b; font-size: 15px; line-height: 2.0; margin-left: 20px;">
+        <li><strong>Reliable delivery</strong> — what happens when a message is lost? TCP handles this with retransmits; SQS handles it with redelivery after a visibility timeout</li>
+        <li><strong>Flow control</strong> — what happens when a sender is faster than the receiver? SQS buffers messages so the sender never blocks</li>
+        <li><strong>NAT traversal</strong> — how do two nodes behind home routers connect directly? (SQS sidesteps this entirely — both sides poll an external service)</li>
+        <li><strong>Encryption in transit</strong> — SQS uses HTTPS by default, so all messages are encrypted between your node and AWS</li>
+        <li><strong>Back-pressure</strong> — what happens if a node's queue fills up? SQS limits a queue to 120,000 in-flight messages; your project will not come close to this</li>
+    </ul>
+
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">We skip these not because they are unimportant — they are critical in production systems — but because
+        this project is about the <em>algorithm</em> layer (gossip, heartbeat, choking, reputation), not the transport layer.
+        SQS handles the hard parts of reliable message delivery for us so you can focus on what happens
+        <em>after</em> a message arrives.</p>
+
+    <div style="background-color: #d1fae5; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin: 20px 0;">
+        <h4 style="color: #059669; margin-top: 5px;">The Tradeoff</h4>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Using SQS as a transport is unconventional. Real P2P systems use raw TCP or UDP.
+            But SQS gives your class a working, reliable message bus without requiring anyone to configure a server, open firewall ports,
+            or manage network infrastructure. It also means the class network works whether you are on campus Wi-Fi or home broadband.
+            That operational simplicity is worth the tradeoff of adding AWS as an intermediary.</p>
+    </div>
+
+    <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+    <div style="display: flex; justify-content: space-between; margin: 20px 0; padding: 10px 0;">
+        <a href="p2p-03-protocol.html"
+            style="color: #64748b; text-decoration: none; font-size: 14px;">Previous: P2P Message Protocol Reference</a>
+        <a href="p2p-project.html"
+            style="color: #1e40af; text-decoration: none; font-size: 14px; font-weight: bold;">Back to Project</a>
+    </div>
+
+</body>
+
+</html>

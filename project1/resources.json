@@ -1,0 +1,13 @@
+{
+  "queues": {
+    "hugo": "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-hugo-p2p",
+    "phin": "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-phin-p2p",
+    "sam": "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-sam-p2p",
+    "bilge": "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-bilge-p2p",
+    "manuel": "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-manuel-p2p",
+    "gil": "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-gil-p2p",
+    "bot-alpha": "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-bot-alpha-p2p",
+    "bot-bravo": "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-bot-bravo-p2p",
+    "bot-charlie": "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-bot-charlie-p2p"
+  }
+}
