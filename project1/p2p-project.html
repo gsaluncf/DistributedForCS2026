@@ -295,17 +295,23 @@ export AWS_DEFAULT_REGION="us-east-1"</pre>
         </p>
         <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Each method has a docstring explaining exactly what it should do. The key idea:
             a gossip node keeps a dict of known peers, merges incoming lists into it, and ages entries out over time.</p>
-        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Checkpoint 1:</strong> Paste this into a Python shell and verify the output makes sense:</p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Checkpoint 1:</strong> Run the test suite from your <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">project1/</code> directory. Every test must pass before you move on.</p>
         <div style="background-color: #1e293b; color: #e2e8f0; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
-            <pre style="margin: 0;">from algorithms.gossip import GossipNode
-g = GossipNode("hugo")
-g.add_peer("bot-alpha", "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-bot-alpha-p2p")
-g.add_peer("sam", "https://sqs.us-east-1.amazonaws.com/194722398367/ds2032-node-sam-p2p")
-print("Known:", g.known_peer_count())                    # should print 2
-print("Target:", g.pick_gossip_target())                 # should print bot-alpha or sam
-print("Message:", g.get_peer_list_message())             # should be a list of 2 dicts
-g.receive_peer_list([{"node_id": "phin", "queue_url": "..."}], sender_id="bot-alpha")
-print("After merge:", g.known_peer_count())              # should print 3</pre>
+            <pre style="margin: 0;">python tests/test_step1_gossip.py</pre>
+        </div>
+        <div style="background-color: #f1f5f9; border: 1px solid #cbd5e1; border-left: 4px solid #22c55e; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+            <pre style="margin: 0;">  [PASS]  add_peer increases count
+  [PASS]  no duplicates when same peer added twice
+  [PASS]  pick_gossip_target returns a known peer
+  [PASS]  pick_gossip_target returns None when empty
+  [PASS]  get_peer_list_message format is correct
+  [PASS]  receive_peer_list discovers new peers
+  [PASS]  receive_peer_list does not re-count known
+  [PASS]  age_entries expires peers after many rounds
+  [PASS]  never gossips with self
+=======================================================
+  9/9 passed
+  All passing — move on to Step 2.</pre>
         </div>
     </div>
 
@@ -326,21 +332,22 @@ print("After merge:", g.known_peer_count())              # should print 3</pre>
             rounds becomes SUSPECT, and after
             <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">miss_threshold</code>
             rounds becomes DEAD. A PONG at any point resets the peer back to ALIVE.</p>
-        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Checkpoint 2:</strong></p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Checkpoint 2:</strong> Run the heartbeat test suite. All 8 tests must pass.</p>
         <div style="background-color: #1e293b; color: #e2e8f0; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
-            <pre style="margin: 0;">from algorithms.heartbeat import HeartbeatNode
-h = HeartbeatNode("hugo", miss_threshold=3, grace_period=2)
-h.add_peer("bot-alpha")
-h.add_peer("sam")
-pinged = h.send_pings(current_round=1)
-print("Pinged:", pinged)                       # should be ['bot-alpha', 'sam']
-h.receive_pong("bot-alpha", current_round=1)
-h.record_miss("sam", current_round=1)
-h.record_miss("sam", current_round=2)
-print("Alive:", h.get_alive_peers())           # bot-alpha
-print("Suspect:", h.get_suspect_peers())       # sam (2 misses >= grace_period=2)
-h.record_miss("sam", current_round=3)
-print("Dead:", h.get_dead_peers())             # sam (3 misses >= miss_threshold=3)</pre>
+            <pre style="margin: 0;">python tests/test_step2_heartbeat.py</pre>
+        </div>
+        <div style="background-color: #f1f5f9; border: 1px solid #cbd5e1; border-left: 4px solid #22c55e; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+            <pre style="margin: 0;">  [PASS]  new peer starts ALIVE
+  [PASS]  send_pings returns all alive peers
+  [PASS]  PONG keeps peer ALIVE
+  [PASS]  grace_period misses -&gt; SUSPECT
+  [PASS]  miss_threshold misses -&gt; DEAD
+  [PASS]  PONG after SUSPECT -&gt; back to ALIVE
+  [PASS]  DEAD peers not included in send_pings
+  [PASS]  ALIVE / SUSPECT / DEAD are disjoint
+=======================================================
+  8/8 passed
+  All passing — move on to Step 3.</pre>
         </div>
     </div>
 
@@ -361,27 +368,27 @@ print("Dead:", h.get_dead_peers())             # sam (3 misses >= miss_threshold
             The
             <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">weighted_majority_vote</code>
             method is the core of the 2032 fraud detection - each peer's reported count is weighted by their trust score, and the count with the most total weight wins.</p>
-        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Checkpoint 3:</strong></p>
+        <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">Checkpoint 3:</strong> Run both suites — choking first, then reputation. All tests must pass before Step 4.</p>
         <div style="background-color: #1e293b; color: #e2e8f0; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
-            <pre style="margin: 0;">from algorithms.reputation import ReputationNode
-r = ReputationNode("hugo")
-r.add_peer("bot-alpha")
-r.add_peer("bot-charlie")
-# bot-alpha is accurate, bot-charlie lies
-for _ in range(10):
-    r.record_report("bot-alpha",  was_accurate=True)
-    r.record_report("bot-charlie", was_accurate=False)
-r.update_all_scores()
-ranked = r.get_ranked_peers()
-print(ranked[0].node_id)          # should be bot-alpha (higher trust)
-print(ranked[1].node_id)          # should be bot-charlie (lower trust)
+            <pre style="margin: 0;">python tests/test_step3a_choking.py
+python tests/test_step3b_reputation.py</pre>
+        </div>
+        <div style="background-color: #f1f5f9; border: 1px solid #cbd5e1; border-left: 4px solid #22c55e; padding: 12px 15px; border-radius: 8px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 13px;">
+            <pre style="margin: 0;">  [PASS]  top contributor gets unchoked
+  [PASS]  max_unchoked limit respected
+  [PASS]  free-rider stays choked over rounds
+  ...6/6 passed
 
-# Test weighted vote: alpha says 100, charlie says 999
-result, confidence = r.weighted_majority_vote({"bot-alpha": 100, "bot-charlie": 999})
-print("Agreed:", result)          # should be 100 (alpha outweighs charlie)
-print("Confidence:", confidence)  # should be > 0.5</pre>
+  [PASS]  accurate peer gains trust over time
+  [PASS]  inaccurate peer loses trust over time
+  [PASS]  weighted vote: honest beats liar
+  [PASS]  unanimous vote has higher confidence
+  ...8/8 passed
+  All passing — move on to Step 4.</pre>
         </div>
     </div>
+
+
 
     <!-- Step 4 -->
     <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-left: 4px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 20px 0;">
