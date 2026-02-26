@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Message Propagation — Bot-Alpha Swimlane</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 980px; margin: 0 auto; padding: 20px; background: #f8fafc; color: #1e293b; }
+        h1 { color: #1e40af; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; }
+        h2 { color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 40px; }
+        h3 { color: #334155; margin-top: 25px; }
+        p, li { font-size: 15px; line-height: 1.7; }
+        code { background: #e2e8f0; padding: 2px 5px; border-radius: 3px; font-family: 'Courier New', monospace; font-size: 13px; }
+        .intro-box { background: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0; }
+        .intro-box h2 { border-left: none; padding-left: 0; margin-top: 10px; }
+        .phase-box { background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; padding: 25px; margin: 30px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+        .phase-label { display: inline-block; background: #1e40af; color: #fff; padding: 4px 14px; border-radius: 20px; font-size: 13px; font-weight: bold; margin-bottom: 10px; }
+        .callout { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px 18px; margin: 18px 0; }
+        .callout h4 { color: #92400e; margin: 5px 0 8px; }
+        .callout-green { background: #d1fae5; border-color: #10b981; }
+        .callout-green h4 { color: #059669; }
+        .callout-red { background: #fee2e2; border-color: #f87171; }
+        .callout-red h4 { color: #991b1b; }
+        hr { border: 1px solid #cbd5e1; margin: 35px 0; }
+        .nav { display: flex; justify-content: space-between; margin: 20px 0; padding: 10px 0; }
+        .nav a { color: #64748b; text-decoration: none; font-size: 14px; }
+        .nav a:last-child { color: #1e40af; font-weight: bold; }
+        svg { display: block; margin: 15px auto; }
+        .legend { display: flex; flex-wrap: wrap; gap: 18px; margin: 15px 0; font-size: 13px; justify-content: center; }
+        .legend span { display: flex; align-items: center; gap: 5px; }
+        .legend .swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+        .log-line { font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.5; padding: 2px 8px; border-radius: 3px; margin: 2px 0; }
+        .log-alpha { background: #dcfce7; color: #166534; }
+        .log-bravo { background: #dbeafe; color: #1e40af; }
+        .log-charlie { background: #e0e7ff; color: #3730a3; }
+        .log-err { background: #fee2e2; color: #991b1b; }
+    </style>
+</head>
+<body>
+
+<!-- SHARED SVG DEFS (arrow markers) -->
+<svg style="height:0;width:0;position:absolute;">
+    <defs>
+        <marker id="a-blue" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3z" fill="#3b82f6"/></marker>
+        <marker id="a-green" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3z" fill="#10b981"/></marker>
+        <marker id="a-purple" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3z" fill="#7c3aed"/></marker>
+        <marker id="a-gray" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3z" fill="#94a3b8"/></marker>
+        <marker id="a-red" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3z" fill="#ef4444"/></marker>
+    </defs>
+</svg>
+
+<!-- INTRO -->
+<div class="intro-box">
+    <h2>Bot-Alpha — Actual Message Propagation</h2>
+    <p>This page traces <strong>the real messages that flow through bot-alpha's SQS queue</strong> during
+       a live boot of the 3-bot network. Every arrow, message ID, and timestamp below comes from an actual
+       run captured at <code>23:12:35–23:12:38</code>. The swimlane is focused on <strong>bot-alpha</strong>
+       so you can see exactly how one node experiences the P2P protocol.</p>
+</div>
+
+<!-- LEGEND -->
+<div class="legend">
+    <span><span class="swatch" style="background:#10b981"></span> bot-alpha (green)</span>
+    <span><span class="swatch" style="background:#3b82f6"></span> bot-bravo (blue)</span>
+    <span><span class="swatch" style="background:#7c3aed"></span> bot-charlie (purple)</span>
+    <span><span class="swatch" style="background:#f59e0b"></span> SQS queue</span>
+    <span><span class="swatch" style="background:#94a3b8"></span> internal action</span>
+</div>
+
+<hr>
+
+<!-- ============================================================ -->
+<!-- PHASE 1: BRAVO JOINS -->
+<!-- ============================================================ -->
+<div class="phase-box">
+    <span class="phase-label">23:12:35 – 23:12:36</span>
+    <h3>Bot-Bravo Joins — Bootstrap Handshake</h3>
+    <p>Bot-bravo starts first and sends <code>HELLO</code> to bot-alpha. Alpha receives it from its queue,
+       registers bravo as a peer, and replies with a <code>PEER_LIST</code>.</p>
+
+    <svg viewBox="0 0 900 390" width="100%" style="max-width:900px;">
+        <!-- Lane headers -->
+        <rect x="5" y="8" width="170" height="34" rx="6" fill="#3b82f6"/>
+        <text x="90" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">bot-bravo</text>
+
+        <rect x="205" y="8" width="180" height="34" rx="6" fill="#f59e0b"/>
+        <text x="295" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">bot-alpha's Queue</text>
+
+        <rect x="415" y="8" width="170" height="34" rx="6" fill="#10b981"/>
+        <text x="500" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">bot-alpha</text>
+
+        <rect x="615" y="8" width="180" height="34" rx="6" fill="#f59e0b"/>
+        <text x="705" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">bot-bravo's Queue</text>
+
+        <!-- Lane lines -->
+        <line x1="90" y1="50" x2="90" y2="385" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+        <line x1="295" y1="50" x2="295" y2="385" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+        <line x1="500" y1="50" x2="500" y2="385" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+        <line x1="705" y1="50" x2="705" y2="385" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+
+        <!-- 1. bravo builds HELLO -->
+        <rect x="15" y="65" width="150" height="30" rx="5" fill="#dbeafe" stroke="#3b82f6"/>
+        <text x="90" y="85" text-anchor="middle" fill="#1e40af" font-size="10">HELLO (c78dc477)</text>
+
+        <!-- 2. send → alpha's queue -->
+        <line x1="165" y1="85" x2="205" y2="105" stroke="#3b82f6" stroke-width="2" marker-end="url(#a-blue)"/>
+        <text x="183" y="90" fill="#3b82f6" font-size="9">send</text>
+
+        <!-- 3. msg in queue -->
+        <rect x="215" y="100" width="160" height="28" rx="5" fill="#fef3c7" stroke="#f59e0b"/>
+        <text x="295" y="118" text-anchor="middle" fill="#92400e" font-size="9">HELLO from bravo queued</text>
+
+        <!-- 4. alpha polls -->
+        <line x1="375" y1="115" x2="415" y2="135" stroke="#10b981" stroke-width="2" marker-end="url(#a-green)"/>
+        <text x="398" y="122" fill="#10b981" font-size="9">poll</text>
+
+        <!-- 5. alpha processes -->
+        <rect x="420" y="135" width="160" height="55" rx="5" fill="#dcfce7" stroke="#10b981"/>
+        <text x="500" y="152" text-anchor="middle" fill="#166534" font-size="10">← HELLO bot-bravo</text>
+        <text x="500" y="165" text-anchor="middle" fill="#166534" font-size="10">add_peer("bot-bravo")</text>
+        <text x="500" y="178" text-anchor="middle" fill="#166534" font-size="9">gossip | heartbeat | choking</text>
+        <text x="500" y="188" text-anchor="middle" fill="#94a3b8" font-size="8">delete msg from queue</text>
+
+        <!-- 6. alpha builds PEER_LIST reply -->
+        <rect x="420" y="200" width="160" height="28" rx="5" fill="#dcfce7" stroke="#10b981"/>
+        <text x="500" y="219" text-anchor="middle" fill="#166534" font-size="10">PEER_LIST (2 entries)</text>
+
+        <!-- 7. send to bravo's queue -->
+        <line x1="580" y1="218" x2="615" y2="238" stroke="#10b981" stroke-width="2" marker-end="url(#a-green)"/>
+        <text x="600" y="225" fill="#10b981" font-size="9">send</text>
+        <rect x="625" y="230" width="160" height="28" rx="5" fill="#fef3c7" stroke="#f59e0b"/>
+        <text x="705" y="249" text-anchor="middle" fill="#92400e" font-size="9">PEER_LIST queued for bravo</text>
+
+        <!-- 8. alpha also gossips to bravo -->
+        <rect x="420" y="268" width="160" height="28" rx="5" fill="#dcfce7" stroke="#10b981"/>
+        <text x="500" y="287" text-anchor="middle" fill="#166534" font-size="10">Gossip → bravo (2 peers)</text>
+
+        <line x1="580" y1="282" x2="615" y2="298" stroke="#10b981" stroke-width="2" marker-end="url(#a-green)"/>
+        <rect x="625" y="290" width="160" height="28" rx="5" fill="#fef3c7" stroke="#f59e0b"/>
+        <text x="705" y="309" text-anchor="middle" fill="#92400e" font-size="9">PEER_LIST (93aed9b4)</text>
+
+        <!-- 9. alpha runs choking + reputation -->
+        <rect x="420" y="328" width="160" height="48" rx="5" fill="#f1f5f9" stroke="#94a3b8"/>
+        <text x="500" y="345" text-anchor="middle" fill="#64748b" font-size="9">UNCHOKE bot-bravo (rank #1)</text>
+        <text x="500" y="358" text-anchor="middle" fill="#64748b" font-size="9">Reputation updated</text>
+        <text x="500" y="371" text-anchor="middle" fill="#64748b" font-size="9">Top: bot-bravo (trust=0.500)</text>
+    </svg>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 2: DATA EXCHANGE -->
+<!-- ============================================================ -->
+<div class="phase-box">
+    <span class="phase-label">23:12:36</span>
+    <h3>Data + Heartbeat Exchange with Bravo</h3>
+    <p>Bot-alpha publishes a <code>VIEW_EVENT</code> and a <code>PING</code>. Bot-bravo does the same.
+       Messages cross mid-flight through the SQS queues.</p>
+
+    <svg viewBox="0 0 900 370" width="100%" style="max-width:900px;">
+        <!-- Lane headers -->
+        <rect x="5" y="8" width="170" height="34" rx="6" fill="#3b82f6"/>
+        <text x="90" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">bot-bravo</text>
+        <rect x="205" y="8" width="180" height="34" rx="6" fill="#f59e0b"/>
+        <text x="295" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">bot-alpha's Queue</text>
+        <rect x="415" y="8" width="170" height="34" rx="6" fill="#10b981"/>
+        <text x="500" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">bot-alpha</text>
+        <rect x="615" y="8" width="180" height="34" rx="6" fill="#f59e0b"/>
+        <text x="705" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">bot-bravo's Queue</text>
+        <!-- Lane lines -->
+        <line x1="90" y1="50" x2="90" y2="360" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+        <line x1="295" y1="50" x2="295" y2="360" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+        <line x1="500" y1="50" x2="500" y2="360" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+        <line x1="705" y1="50" x2="705" y2="360" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+
+        <!-- Alpha publishes ViewEvent -->
+        <rect x="420" y="60" width="160" height="35" rx="5" fill="#dcfce7" stroke="#10b981"/>
+        <text x="500" y="77" text-anchor="middle" fill="#166534" font-size="10">VIEW_EVENT (3cbf1323)</text>
+        <text x="500" y="90" text-anchor="middle" fill="#166534" font-size="9">neon-drift count=156 [ACCURATE]</text>
+
+        <line x1="580" y1="80" x2="615" y2="100" stroke="#10b981" stroke-width="2" marker-end="url(#a-green)"/>
+        <text x="600" y="87" fill="#10b981" font-size="8">→1 peer</text>
+        <rect x="625" y="95" width="160" height="24" rx="5" fill="#fef3c7" stroke="#f59e0b"/>
+        <text x="705" y="111" text-anchor="middle" fill="#92400e" font-size="9">VIEW_EVENT queued</text>
+
+        <!-- Bravo sends ViewEvent + PING (simultaneous cross-traffic) -->
+        <rect x="15" y="65" width="150" height="35" rx="5" fill="#dbeafe" stroke="#3b82f6"/>
+        <text x="90" y="82" text-anchor="middle" fill="#1e40af" font-size="10">VIEW_EVENT (f21f4ebf)</text>
+        <text x="90" y="95" text-anchor="middle" fill="#1e40af" font-size="9">midnight-run count=135</text>
+
+        <line x1="165" y1="90" x2="205" y2="130" stroke="#3b82f6" stroke-width="2" marker-end="url(#a-blue)"/>
+
+        <rect x="15" y="108" width="150" height="24" rx="5" fill="#dbeafe" stroke="#3b82f6"/>
+        <text x="90" y="124" text-anchor="middle" fill="#1e40af" font-size="10">PING (7ff750ae) seq=1</text>
+
+        <line x1="165" y1="125" x2="205" y2="155" stroke="#3b82f6" stroke-width="2" marker-end="url(#a-blue)"/>
+
+        <!-- Messages in alpha's queue -->
+        <rect x="215" y="130" width="160" height="24" rx="5" fill="#fef3c7" stroke="#f59e0b"/>
+        <text x="295" y="146" text-anchor="middle" fill="#92400e" font-size="9">VIEW_EVENT from bravo</text>
+        <rect x="215" y="160" width="160" height="24" rx="5" fill="#fef3c7" stroke="#f59e0b"/>
+        <text x="295" y="176" text-anchor="middle" fill="#92400e" font-size="9">PING from bravo seq=1</text>
+
+        <!-- Alpha polls and processes both -->
+        <line x1="375" y1="148" x2="415" y2="205" stroke="#10b981" stroke-width="2" marker-end="url(#a-green)"/>
+        <text x="398" y="175" fill="#10b981" font-size="9">poll</text>
+
+        <rect x="420" y="200" width="160" height="45" rx="5" fill="#dcfce7" stroke="#10b981"/>
+        <text x="500" y="217" text-anchor="middle" fill="#166534" font-size="10">← VIEW_EVENT bravo</text>
+        <text x="500" y="230" text-anchor="middle" fill="#166534" font-size="9">observe: midnight-run=135</text>
+        <text x="500" y="240" text-anchor="middle" fill="#94a3b8" font-size="8">record_contribution(bravo)</text>
+
+        <rect x="420" y="255" width="160" height="30" rx="5" fill="#dcfce7" stroke="#10b981"/>
+        <text x="500" y="270" text-anchor="middle" fill="#166534" font-size="10">← PING bravo seq=1</text>
+        <text x="500" y="282" text-anchor="middle" fill="#94a3b8" font-size="8">record_contribution(bravo)</text>
+
+        <!-- Alpha sends PONG -->
+        <rect x="420" y="295" width="160" height="24" rx="5" fill="#dcfce7" stroke="#10b981"/>
+        <text x="500" y="311" text-anchor="middle" fill="#166534" font-size="10">PONG (7b0c711e) seq=1</text>
+        <line x1="580" y1="307" x2="615" y2="322" stroke="#10b981" stroke-width="2" marker-end="url(#a-green)"/>
+        <rect x="625" y="315" width="160" height="24" rx="5" fill="#fef3c7" stroke="#f59e0b"/>
+        <text x="705" y="331" text-anchor="middle" fill="#92400e" font-size="9">PONG queued for bravo</text>
+
+        <!-- Alpha receives bravo's PONG -->
+        <rect x="215" y="335" width="160" height="24" rx="5" fill="#fef3c7" stroke="#f59e0b"/>
+        <text x="295" y="351" text-anchor="middle" fill="#92400e" font-size="9">PONG from bravo (9316d0d1)</text>
+        <line x1="375" y1="348" x2="415" y2="348" stroke="#10b981" stroke-width="1.5" marker-end="url(#a-green)" stroke-dasharray="4"/>
+        <text x="440" y="358" fill="#166534" font-size="8">bravo → ALIVE ✓</text>
+    </svg>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 3: CHARLIE JOINS -->
+<!-- ============================================================ -->
+<div class="phase-box">
+    <span class="phase-label">23:12:37</span>
+    <h3>Bot-Charlie Joins — Network Grows to 3</h3>
+    <p>Bot-charlie starts and sends <code>HELLO</code> to bot-alpha. Alpha now knows 3 peers and replies
+       with a <code>PEER_LIST</code> of 3 entries. Charlie discovers bravo through alpha's gossip.</p>
+
+    <svg viewBox="0 0 900 340" width="100%" style="max-width:900px;">
+        <!-- Lane headers -->
+        <rect x="5" y="8" width="170" height="34" rx="6" fill="#7c3aed"/>
+        <text x="90" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">bot-charlie</text>
+        <rect x="205" y="8" width="180" height="34" rx="6" fill="#f59e0b"/>
+        <text x="295" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">bot-alpha's Queue</text>
+        <rect x="415" y="8" width="170" height="34" rx="6" fill="#10b981"/>
+        <text x="500" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">bot-alpha</text>
+        <rect x="615" y="8" width="180" height="34" rx="6" fill="#f59e0b"/>
+        <text x="705" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">bot-charlie's Queue</text>
+        <!-- Lane lines -->
+        <line x1="90" y1="50" x2="90" y2="330" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+        <line x1="295" y1="50" x2="295" y2="330" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+        <line x1="500" y1="50" x2="500" y2="330" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+        <line x1="705" y1="50" x2="705" y2="330" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+
+        <!-- Charlie sends HELLO -->
+        <rect x="15" y="65" width="150" height="28" rx="5" fill="#e0e7ff" stroke="#7c3aed"/>
+        <text x="90" y="84" text-anchor="middle" fill="#3730a3" font-size="10">HELLO (1670e684)</text>
+
+        <line x1="165" y1="82" x2="205" y2="102" stroke="#7c3aed" stroke-width="2" marker-end="url(#a-purple)"/>
+        <rect x="215" y="95" width="160" height="24" rx="5" fill="#fef3c7" stroke="#f59e0b"/>
+        <text x="295" y="111" text-anchor="middle" fill="#92400e" font-size="9">HELLO from charlie queued</text>
+
+        <!-- Alpha polls -->
+        <line x1="375" y1="108" x2="415" y2="130" stroke="#10b981" stroke-width="2" marker-end="url(#a-green)"/>
+
+        <!-- Alpha processes -->
+        <rect x="420" y="130" width="160" height="55" rx="5" fill="#dcfce7" stroke="#10b981"/>
+        <text x="500" y="148" text-anchor="middle" fill="#166534" font-size="10">← HELLO bot-charlie</text>
+        <text x="500" y="162" text-anchor="middle" fill="#166534" font-size="10">add_peer("bot-charlie")</text>
+        <text x="500" y="175" text-anchor="middle" fill="#166534" font-size="9">now knows: bravo + charlie</text>
+        <text x="500" y="184" text-anchor="middle" fill="#94a3b8" font-size="8">Welcomed new peer: bot-charlie</text>
+
+        <!-- Alpha sends PEER_LIST (3 entries) -->
+        <rect x="420" y="198" width="160" height="28" rx="5" fill="#dcfce7" stroke="#10b981"/>
+        <text x="500" y="216" text-anchor="middle" fill="#166534" font-size="10">PEER_LIST (13c25fba)</text>
+        <text x="582" y="210" fill="#166534" font-size="8">3 entries</text>
+
+        <line x1="580" y1="215" x2="615" y2="240" stroke="#10b981" stroke-width="2" marker-end="url(#a-green)"/>
+        <rect x="625" y="233" width="160" height="24" rx="5" fill="#fef3c7" stroke="#f59e0b"/>
+        <text x="705" y="249" text-anchor="middle" fill="#92400e" font-size="9">PEER_LIST for charlie</text>
+
+        <!-- Charlie receives and discovers bravo -->
+        <line x1="625" y1="255" x2="165" y2="281" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#a-purple)" stroke-dasharray="4"/>
+        <rect x="15" y="275" width="150" height="40" rx="5" fill="#e0e7ff" stroke="#7c3aed"/>
+        <text x="90" y="292" text-anchor="middle" fill="#3730a3" font-size="10">merge PEER_LIST</text>
+        <text x="90" y="305" text-anchor="middle" fill="#3730a3" font-size="9">discovered 2 new peers!</text>
+        <text x="90" y="315" text-anchor="middle" fill="#94a3b8" font-size="8">now knows: alpha, bravo</text>
+
+        <!-- Alpha also gets charlie's peer list later -->
+        <rect x="215" y="300" width="160" height="24" rx="5" fill="#fef3c7" stroke="#f59e0b"/>
+        <text x="295" y="316" text-anchor="middle" fill="#92400e" font-size="9">PEER_LIST from charlie (88662166)</text>
+    </svg>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 4: STALE ROUTING TABLE — DHT LESSON -->
+<!-- ============================================================ -->
+<div class="phase-box">
+    <span class="phase-label">23:12:37</span>
+    <h3>Stale Routing Table — How Peer Tables Propagate (and Break)</h3>
+    <p>When charlie received alpha's <code>PEER_LIST</code>, it <strong>trusted every entry</strong> —
+       including alpha's own <em>self-entry</em>, which contained a placeholder URL instead of the real
+       SQS queue address. Charlie cached this stale entry and every subsequent <code>send()</code> to
+       alpha failed. This is identical to a <strong>stale entry in a DHT finger table</strong>.</p>
+
+    <svg viewBox="0 0 900 440" width="100%" style="max-width:900px;">
+        <!-- Lane headers -->
+        <rect x="5" y="8" width="200" height="34" rx="6" fill="#10b981"/>
+        <text x="105" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">Alpha's Peer Table</text>
+        <rect x="235" y="8" width="200" height="34" rx="6" fill="#3b82f6"/>
+        <text x="335" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">PEER_LIST Message</text>
+        <rect x="465" y="8" width="200" height="34" rx="6" fill="#7c3aed"/>
+        <text x="565" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">Charlie's Route Cache</text>
+        <rect x="695" y="8" width="190" height="34" rx="6" fill="#ef4444"/>
+        <text x="790" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">Result</text>
+
+        <!-- Lane lines -->
+        <line x1="105" y1="50" x2="105" y2="430" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+        <line x1="335" y1="50" x2="335" y2="430" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+        <line x1="565" y1="50" x2="565" y2="430" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+        <line x1="790" y1="50" x2="790" y2="430" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4"/>
+
+        <!-- Alpha's table contents -->
+        <rect x="15" y="65" width="180" height="70" rx="5" fill="#dcfce7" stroke="#10b981"/>
+        <text x="105" y="82" text-anchor="middle" fill="#166534" font-size="10" font-weight="bold">gossip.peers table:</text>
+        <text x="105" y="98" text-anchor="middle" fill="#991b1b" font-size="9">self: sqs://fake/bot-alpha ✗</text>
+        <text x="105" y="112" text-anchor="middle" fill="#166534" font-size="9">bravo: https://sqs…/bravo ✓</text>
+        <text x="105" y="126" text-anchor="middle" fill="#166534" font-size="9">charlie: https://sqs…/charlie ✓</text>
+
+        <!-- Arrow: table → message -->
+        <line x1="195" y1="100" x2="240" y2="100" stroke="#10b981" stroke-width="2" marker-end="url(#a-green)"/>
+        <text x="218" y="92" fill="#10b981" font-size="8">encode</text>
+
+        <!-- PEER_LIST message -->
+        <rect x="245" y="65" width="180" height="70" rx="5" fill="#dbeafe" stroke="#3b82f6"/>
+        <text x="335" y="82" text-anchor="middle" fill="#1e40af" font-size="10" font-weight="bold">PEER_LIST (13c25fba)</text>
+        <text x="335" y="98" text-anchor="middle" fill="#991b1b" font-size="9">alpha → sqs://fake/… ✗</text>
+        <text x="335" y="112" text-anchor="middle" fill="#1e40af" font-size="9">bravo → https://sqs…/bravo ✓</text>
+        <text x="335" y="126" text-anchor="middle" fill="#1e40af" font-size="9">charlie → https://sqs…/charlie ✓</text>
+
+        <!-- Arrow: message → charlie's cache -->
+        <line x1="425" y1="100" x2="470" y2="100" stroke="#3b82f6" stroke-width="2" marker-end="url(#a-blue)"/>
+        <text x="448" y="92" fill="#3b82f6" font-size="8">merge</text>
+
+        <!-- Charlie's cache -->
+        <rect x="475" y="65" width="180" height="70" rx="5" fill="#e0e7ff" stroke="#7c3aed"/>
+        <text x="565" y="82" text-anchor="middle" fill="#3730a3" font-size="10" font-weight="bold">transport._queue_url_cache</text>
+        <text x="565" y="98" text-anchor="middle" fill="#991b1b" font-size="9">alpha → sqs://fake/… ✗ STALE</text>
+        <text x="565" y="112" text-anchor="middle" fill="#3730a3" font-size="9">bravo → https://sqs…/bravo ✓</text>
+        <text x="565" y="126" text-anchor="middle" fill="#94a3b8" font-size="8">overwrites any previous good URL!</text>
+
+        <!-- Arrow: charlie tries to send -->
+        <line x1="655" y1="100" x2="700" y2="100" stroke="#ef4444" stroke-width="2" marker-end="url(#a-red)"/>
+
+        <!-- Failure -->
+        <rect x="705" y="70" width="170" height="55" rx="5" fill="#fee2e2" stroke="#ef4444"/>
+        <text x="790" y="88" text-anchor="middle" fill="#ef4444" font-size="18" font-weight="bold">✗ ✗ ✗</text>
+        <text x="790" y="105" text-anchor="middle" fill="#991b1b" font-size="9">NonExistentQueue</text>
+        <text x="790" y="118" text-anchor="middle" fill="#991b1b" font-size="8">3 failed sends to alpha</text>
+
+        <!-- SELF-HEALING section -->
+        <line x1="20" y1="160" x2="880" y2="160" stroke="#10b981" stroke-width="1" stroke-dasharray="8"/>
+        <text x="450" y="180" text-anchor="middle" fill="#059669" font-size="12" font-weight="bold">Self-Healing: The Network Converges Anyway</text>
+
+        <!-- Alpha sends directly to charlie (reverse direction works) -->
+        <rect x="15" y="200" width="180" height="45" rx="5" fill="#dcfce7" stroke="#10b981"/>
+        <text x="105" y="218" text-anchor="middle" fill="#166534" font-size="10">Alpha sends HELLO to charlie</text>
+        <text x="105" y="232" text-anchor="middle" fill="#166534" font-size="9">with REAL queue URL ✓</text>
+
+        <line x1="195" y1="225" x2="470" y2="270" stroke="#10b981" stroke-width="2" marker-end="url(#a-green)"/>
+        <text x="330" y="242" fill="#10b981" font-size="9">alpha → charlie's queue (works!)</text>
+
+        <!-- Charlie receives and fixes cache -->
+        <rect x="475" y="265" width="180" height="50" rx="5" fill="#d1fae5" stroke="#10b981"/>
+        <text x="565" y="283" text-anchor="middle" fill="#059669" font-size="10">_handle_hello() fires</text>
+        <text x="565" y="297" text-anchor="middle" fill="#059669" font-size="9">cache[alpha] = REAL URL ✓</text>
+        <text x="565" y="310" text-anchor="middle" fill="#94a3b8" font-size="8">stale entry overwritten</text>
+
+        <!-- Result: fixed -->
+        <line x1="655" y1="290" x2="700" y2="290" stroke="#10b981" stroke-width="2" marker-end="url(#a-green)"/>
+        <rect x="705" y="270" width="170" height="40" rx="5" fill="#d1fae5" stroke="#10b981"/>
+        <text x="790" y="288" text-anchor="middle" fill="#059669" font-size="10">Subsequent sends</text>
+        <text x="790" y="302" text-anchor="middle" fill="#059669" font-size="10">to alpha work ✓</text>
+
+        <!-- Timeline annotation -->
+        <rect x="120" y="340" width="650" height="80" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+        <text x="445" y="362" text-anchor="middle" fill="#1e40af" font-size="11" font-weight="bold">Log Evidence (from the actual run)</text>
+        <text x="445" y="380" text-anchor="middle" fill="#991b1b" font-size="9" font-family="monospace">[ERR] Send to bot-alpha: NonExistentQueue (×3)</text>
+        <text x="445" y="396" text-anchor="middle" fill="#166534" font-size="9" font-family="monospace">[23:12:37] [bot-charlie] ← [HELLO] bot-alpha (6bf70eb4) — cache healed</text>
+        <text x="445" y="412" text-anchor="middle" fill="#166534" font-size="9" font-family="monospace">[23:12:38] [bot-alpha] ← [PEER_LIST] bot-charlie (88662166) — bidirectional ✓</text>
+    </svg>
+</div>
+
+<hr>
+
+<!-- ============================================================ -->
+<!-- DHT CONNECTION -->
+<!-- ============================================================ -->
+<h2>The DHT Connection</h2>
+
+<p>What you just saw is <strong>exactly how distributed hash tables work</strong> — and exactly how they fail.
+   In a DHT like Chord or Kademlia, each node maintains a <em>routing table</em> (called a "finger table"
+   in Chord) that maps node IDs to network addresses. Nodes don't discover peers by asking a central server;
+   they learn about peers <strong>transitively</strong>, through table exchanges with neighbors.</p>
+
+<div class="callout">
+    <h4>1. Routing Tables Are Built from Secondhand Information</h4>
+    <p style="margin:0;">Charlie never resolved alpha's queue URL itself — it trusted the PEER_LIST that
+       alpha sent. In a DHT, when node C asks node A "who do you know?", A responds with its routing table.
+       C <em>trusts</em> those entries. If any entry is stale or wrong, C inherits the problem.</p>
+</div>
+
+<div class="callout callout-red">
+    <h4>2. Stale Entries Cause Routing Failures</h4>
+    <p style="margin:0;">Alpha's gossip table had a placeholder URL for its own entry — like a DHT node
+       whose IP address changed but whose old address is still cached in other nodes' finger tables.
+       Charlie's 3 failed <code>send()</code> calls are the P2P equivalent of a DHT lookup hitting a dead
+       entry and needing to fall back to the next finger.</p>
+</div>
+
+<div class="callout-green callout">
+    <h4>3. The Network Self-Heals Through Redundant Paths</h4>
+    <p style="margin:0;">Despite the stale entry, charlie and alpha still connected — because alpha
+       independently sent a <code>HELLO</code> to charlie's queue (which had the correct URL from
+       charlie's original message). This overwrote the stale cache entry. In DHT terms, this is
+       <strong>eventual consistency</strong>: the routing table converges to correctness over time as
+       nodes exchange fresh information through multiple paths. A single stale entry doesn't partition
+       the network — other routes compensate.</p>
+</div>
+
+<div class="callout">
+    <h4>4. Why This Matters for Real Systems</h4>
+    <p style="margin:0;">Every production DHT (BitTorrent's Mainline DHT, IPFS's Kademlia, Amazon's
+       Dynamo) handles this same problem. Nodes join and leave constantly, IP addresses change, and
+       routing tables go stale. The protocols are designed so that <em>partial knowledge</em> is enough
+       — you don't need a perfect routing table to reach any node; you just need enough correct entries
+       to route around the stale ones. That's what happened here in 2 seconds of real wall-clock time.</p>
+</div>
+
+<hr>
+
+<!-- KEY TAKEAWAYS -->
+<h2>What the Logs Reveal</h2>
+
+<div class="callout-green callout">
+    <h4>The SQS Queue Is Always in the Middle</h4>
+    <p style="margin:0;">Every single message — HELLO, PEER_LIST, PING, PONG, VIEW_EVENT — goes through exactly the same path:
+       <strong>Sender</strong> → <code>encode(JSON)</code> → <code>sqs.send_message()</code> →
+       <strong>Recipient's Queue</strong> → <code>sqs.receive_message()</code> → <code>decode(JSON)</code> →
+       <code>handle_message()</code> → <code>sqs.delete_message()</code>.</p>
+</div>
+
+<div class="callout">
+    <h4>Messages Cross in Flight</h4>
+    <p style="margin:0;">In the logs, bot-alpha and bot-bravo both send at <code>23:12:36</code> — alpha sends a VIEW_EVENT
+       while bravo sends a PING. They don't wait for each other. Both messages sit independently in their
+       respective SQS queues until each node's next poll picks them up. This is the asynchronous, decoupled
+       nature of SQS communication.</p>
+</div>
+
+<div class="callout">
+    <h4>Gossip Works — Charlie Discovers Bravo Through Alpha</h4>
+    <p style="margin:0;">Charlie only sent HELLO to alpha and bravo directly. But when alpha replied with its PEER_LIST (3 entries),
+       charlie <em>discovered</em> bravo's queue URL without ever contacting bravo's bootstrap. This is
+       gossip protocol in action — peer knowledge propagates transitively, just like DHT routing tables.</p>
+</div>
+
+<hr>
+
+<!-- NAV -->
+<div class="nav">
+    <a href="p2p-04-sqs.html">← Previous: SQS as a Transport</a>
+    <a href="p2p-project.html">Back to Project →</a>
+</div>
+
+</body>
+</html>
