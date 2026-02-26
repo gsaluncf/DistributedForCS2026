@@ -183,6 +183,8 @@ class P2PNode:
             print(f"[ERR] No queue URL for {self.node_id}. Check resources.json.")
             return False
         self._log(f"Initialized. Queue: {self.my_queue_url}")
+        # Wire up gossip with our queue URL
+        self.gossip.queue_url = self.my_queue_url
         return True
 
     # ------------------------------------------------------------------
