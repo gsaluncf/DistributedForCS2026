@@ -51,7 +51,7 @@ class GossipNode:
 
     def __init__(self, node_id: str, queue_url: str = ""):
         self.node_id = node_id
-        self.queue_url = queue_url or f"sqs://fake/{node_id}"
+        self.queue_url = queue_url
         self.peers: Dict[str, PeerEntry] = {}
         self._log: List[str] = []
 
