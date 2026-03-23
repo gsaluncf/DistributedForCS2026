@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leader Election in Distributed Systems</title>
+</head>
+
+<body>
+
+<!-- ============================================ -->
+<!-- INTRODUCTION -->
+<!-- ============================================ -->
+
+<div style="background-color: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">Leader Election in Distributed Systems</h2>
+    <p style="color: #1e293b; font-size: 16px; line-height: 1.6;">What it is, why it matters, the algorithms behind it, and how we will implement it in our AdFlow P2P network.</p>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Leader election is not about centralization. It is about giving one node a temporary, revocable responsibility while the rest stand ready to take over.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- THE ADFLOW PROBLEM -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">The AdFlow Problem: Who Pays the Creators?</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Recap: In the AdFlow 2032 network, <strong style="color: #1e40af;">hosts</strong> (content creators) serve ads alongside their content and report view counts. <strong style="color: #1e40af;">Auditor nodes</strong> verify those counts through reputation-weighted majority votes. But there is a piece we have not addressed yet:</p>
+
+<p style="color: #1e293b; font-size: 16px; line-height: 1.6;"><strong>Someone has to actually pay the creators.</strong></p>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">In AdFlow, the three bot nodes - <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">bot-alpha</code>, <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">bot-bravo</code>, and <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">bot-charlie</code> - are the <strong style="color: #1e40af;">Payment Servers</strong>. They represent the ad network's payment infrastructure. When an audit concludes that a creator legitimately served 1,000 verified ad views, a Payment Server issues the payout.</p>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Here is the problem:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">bot-alpha   sees AuditResult(show:midnight-run, count=1000)  pays creator $10.00
+bot-bravo   sees AuditResult(show:midnight-run, count=1000)  pays creator $10.00
+bot-charlie sees AuditResult(show:midnight-run, count=1000)  pays creator $10.00
+                                                             -----------------
+                                                             Creator gets $30</pre>
+</div>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">If all three payment servers independently act on the same audit result, <strong>the creator gets triple-paid</strong>. That is a fast way to bankrupt the ad network.</p>
+
+<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #92400e; margin-top: 5px;">The Rule</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong>Exactly one Payment Server must be active at any time.</strong> The other two are hot standbys. If the active one crashes, a standby takes over - but there must never be two active simultaneously.</p>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">This is the <strong style="color: #1e40af;">leader election problem.</strong></p>
+</div>
+
+<div style="background-color: #d1fae5; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h4 style="color: #059669; margin-top: 5px;">Key Insight</h4>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Leader election does NOT mean centralization. The leader is just another peer - it can fail, and when it does, a new one is elected. The <em>algorithm</em> is the decentralized part. The ad network never goes down; it just picks a new cashier.</p>
+</div>
+
+<!-- ============================================ -->
+<!-- PAYMENT SERVER DIAGRAM -->
+<!-- ============================================ -->
+
+<div style="text-align: center; margin: 30px 0;">
+    <svg viewBox="0 0 700 320" style="max-width: 680px; width: 100%; height: auto; font-family: Arial, sans-serif;">
+        <defs>
+            <marker id="arrowPS" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+            </marker>
+        </defs>
+
+        <text x="350" y="20" text-anchor="middle" fill="#64748b" font-size="12" font-weight="bold">THE DOUBLE-PAY PROBLEM</text>
+
+        <!-- Audit Result box -->
+        <rect x="220" y="35" width="260" height="45" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="2" />
+        <text x="350" y="55" text-anchor="middle" fill="#1e40af" font-size="12" font-weight="bold">AUDIT_RESULT</text>
+        <text x="350" y="70" text-anchor="middle" fill="#1e40af" font-size="10">show:midnight-run = 1000 views</text>
+
+        <!-- Arrows to all three bots -->
+        <line x1="290" y1="80" x2="120" y2="120" stroke="#64748b" stroke-width="2" marker-end="url(#arrowPS)" />
+        <line x1="350" y1="80" x2="350" y2="120" stroke="#64748b" stroke-width="2" marker-end="url(#arrowPS)" />
+        <line x1="410" y1="80" x2="580" y2="120" stroke="#64748b" stroke-width="2" marker-end="url(#arrowPS)" />
+
+        <!-- Bot Alpha -->
+        <rect x="40" y="125" width="160" height="50" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="2" />
+        <text x="120" y="147" text-anchor="middle" fill="#92400e" font-size="11" font-weight="bold">bot-alpha</text>
+        <text x="120" y="165" text-anchor="middle" fill="#92400e" font-size="10">Pays $10.00</text>
+
+        <!-- Bot Bravo -->
+        <rect x="270" y="125" width="160" height="50" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="2" />
+        <text x="350" y="147" text-anchor="middle" fill="#92400e" font-size="11" font-weight="bold">bot-bravo</text>
+        <text x="350" y="165" text-anchor="middle" fill="#92400e" font-size="10">Pays $10.00</text>
+
+        <!-- Bot Charlie -->
+        <rect x="500" y="125" width="160" height="50" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="2" />
+        <text x="580" y="147" text-anchor="middle" fill="#92400e" font-size="11" font-weight="bold">bot-charlie</text>
+        <text x="580" y="165" text-anchor="middle" fill="#92400e" font-size="10">Pays $10.00</text>
+
+        <!-- Arrows down to creator -->
+        <line x1="120" y1="175" x2="310" y2="230" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrowPS)" />
+        <line x1="350" y1="175" x2="350" y2="230" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrowPS)" />
+        <line x1="580" y1="175" x2="390" y2="230" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrowPS)" />
+
+        <!-- Creator -->
+        <rect x="260" y="235" width="180" height="50" rx="8" fill="#fee2e2" stroke="#ef4444" stroke-width="2" />
+        <text x="350" y="257" text-anchor="middle" fill="#991b1b" font-size="12" font-weight="bold">Creator</text>
+        <text x="350" y="275" text-anchor="middle" fill="#991b1b" font-size="11">Receives $30 (should be $10)</text>
+
+        <text x="350" y="310" text-anchor="middle" fill="#94a3b8" font-size="11" font-style="italic">Without leader election, every payment server acts independently.</text>
+    </svg>
+    <p style="color: #64748b; font-size: 13px; margin-top: 10px;">The double-pay problem: all three payment servers see the same audit result and each independently issues a payout.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- ALGORITHM 1: BULLY -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Algorithm 1: The Bully Algorithm</h2>
+<p style="color: #64748b; font-size: 14px;">Garcia-Molina, 1982</p>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">The idea:</strong> The node with the highest ID wins. If you think the leader is dead, you start an election and bully everyone with a lower ID into submission.</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">Node C detects leader is dead
+  C sends ELECTION to D, E  (nodes with higher IDs)
+    D responds "I'm here, back off"
+    D sends ELECTION to E
+      E responds "I'm here, back off"
+      E has no higher peers
+      E broadcasts: "I am the new COORDINATOR"</pre>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Messages</h3>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Message</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">ELECTION</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">"I am starting an election" - sent to all higher-ID nodes</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">OK / ALIVE</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">"Back off, I outrank you" - response to lower-ID challenger</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">COORDINATOR</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">"I won, I am the new leader" - broadcast to all nodes</td>
+</tr>
+</tbody>
+</table>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Properties</h3>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Property</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Complexity</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">O(n squared) messages worst case</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Assumption</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Node IDs are totally ordered, and higher = better</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Failure handling</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">If the elected leader does not announce within timeout, restart</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Weakness</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Unstable when the highest-ID node keeps crashing and recovering ("flip-flopping")</td>
+</tr>
+</tbody>
+</table>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- ALGORITHM 2: RING -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Algorithm 2: The Ring Algorithm</h2>
+<p style="color: #64748b; font-size: 14px;">Chang-Roberts, 1979</p>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">The idea:</strong> Nodes are arranged in a logical ring. An election message travels around the ring; each node either forwards it or replaces it with its own ID (if higher). When a message goes all the way around and returns to the sender, the highest ID in the message is the leader.</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">Ring: A then B then C then D then A
+
+A starts election, sends {candidate: A} to B
+B has higher ID, sends {candidate: B} to C
+C has lower ID, forwards {candidate: B} to D
+D has higher ID, sends {candidate: D} to A
+A sees candidate=D came back to origin. D is leader.
+A broadcasts COORDINATOR(D)</pre>
+</div>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Property</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Complexity</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">O(n) to O(n squared) messages</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Assumption</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Nodes form a logical ring (overlay topology)</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Strength</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Simpler than Bully, works well for small networks</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Weakness</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Ring must be maintained; single node failure can break the ring</td>
+</tr>
+</tbody>
+</table>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong>Why it is less ideal for us:</strong> We do not have a ring topology - our gossip mesh is fully connected. We would need to impose a ring ordering, adding unnecessary structure.</p>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- ALGORITHM 3: RAFT -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Algorithm 3: Raft Leader Election</h2>
+<p style="color: #64748b; font-size: 14px;">Ongaro and Ousterhout, 2014</p>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">The idea:</strong> Nodes start as <strong>followers</strong>. If a follower does not hear from a leader within a random timeout, it becomes a <strong>candidate</strong> and asks peers to vote. The first candidate to get a majority wins the <strong>term</strong>.</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">States: FOLLOWER then CANDIDATE then LEADER
+
+Follower timeout fires, becomes CANDIDATE
+  Increments term to T+1
+  Votes for itself
+  Sends REQUEST_VOTE(term=T+1) to all peers
+  If majority votes received, becomes LEADER
+  If hears from a leader with term >= T+1, reverts to FOLLOWER
+  If election timeout (split vote), new term, try again</pre>
+</div>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">The key insight: randomized timeouts prevent ties.</strong> If every node picks a different random timeout (e.g., 150-300ms), one will almost always time out first and win.</p>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Property</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Complexity</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">O(n) messages per election</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Assumption</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Majority quorum is reachable; clocks are approximately synchronized</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Strength</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Handles split votes gracefully, well-understood, production-proven</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Weakness</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Requires majority - network partitions can prevent election</td>
+</tr>
+</tbody>
+</table>
+
+<div style="background-color: #d1fae5; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h4 style="color: #059669; margin-top: 5px;">Real-World Usage</h4>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Raft is what etcd, Consul, and CockroachDB use. It is the gold standard for leader election in production systems.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- ALGORITHM 4: ZAB -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Algorithm 4: ZooKeeper's ZAB (Atomic Broadcast)</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">The idea:</strong> Similar to Raft but uses an epoch-based approach. Nodes propose themselves, the one with the most up-to-date log wins. Used in Apache ZooKeeper.</p>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">ZAB solves consensus + leader election + state replication all together. We will skip it for now, but <strong>we will come back to this</strong> - when we get to consensus and log replication, ZAB's approach will make a lot more sense.</p>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- COMPARISON MATRIX -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Comparison Matrix</h2>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Algorithm</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Messages</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Topology</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Handles Partitions</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Complexity</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Best For</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Bully</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">O(n squared)</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Any</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">No</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #10b981;"><strong>Easy</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Small networks, fixed membership</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Ring</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">O(n)</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Ring</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">No</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Medium</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Ring overlays</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Raft</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">O(n)</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Any</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Yes (majority)</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Hard</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Production systems, strong guarantees</td>
+</tr>
+</tbody>
+</table>
+
+<!-- ============================================ -->
+<!-- OUR IMPLEMENTATION APPROACH -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Our Implementation Approach</h2>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">The Setup: Payment Server Election</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Remember the cast:</p>
+<ul style="color: #1e293b; font-size: 15px; line-height: 1.8;">
+    <li><strong style="color: #1e40af;">bot-alpha, bot-bravo, bot-charlie</strong> - Payment Servers (hot standbys for each other)</li>
+    <li><strong style="color: #1e40af;">hugo, phin, sam, bilge, manuel</strong> - Student nodes (auditors and creators)</li>
+</ul>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Only the bots can process payments. The students participate in the election protocol (they need to <em>know</em> who the active Payment Server is so they send audit results to the right place), but only bots can <em>win</em> the election.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Why Bully (with a twist)</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The <strong style="color: #1e40af;">Bully algorithm</strong> is the right choice for Payment Server election:</p>
+
+<ol style="color: #1e293b; font-size: 15px; line-height: 1.8;">
+    <li><strong>We already know every bot</strong> - <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">config.py</code> has <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">BOTS</code>. No discovery needed.</li>
+    <li><strong>We already have heartbeat</strong> - failure detection is solved. Students know which bots are ALIVE.</li>
+    <li><strong>Small candidate pool</strong> - Only 3 bots compete. O(n squared) on 3 nodes is 9 messages. Trivial.</li>
+    <li><strong>We add reputation</strong> - instead of highest-ID-wins, the bot with the <strong>highest reputation score</strong> wins.</li>
+</ol>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">The Twist: Reputation-Weighted Bully</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Classic Bully says "highest ID wins." Our version says <strong style="color: #1e40af;">"most trusted bot wins."</strong> This means:</p>
+
+<ul style="color: #1e293b; font-size: 15px; line-height: 1.8;">
+    <li>A bot that reliably responds to heartbeats - higher reputation - more likely to be Payment Server</li>
+    <li>A bot that processes payments honestly - higher reputation - stays as Payment Server</li>
+    <li>A compromised bot that inflates counts - low reputation - gets replaced by a standby</li>
+</ul>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">This ties leader election directly into our existing reputation system. <strong>The ad network naturally routes money through the most trustworthy payment processor.</strong></p>
+
+<div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Note</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">If two bots have equal reputation, break ties by node ID (alphabetical). This ensures determinism - every node arrives at the same answer independently.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- SWIMLANE DIAGRAM -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">The Election Flow</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The diagram below shows what happens when bot-alpha (the current Payment Server) crashes. A student node detects the failure and triggers an election among the surviving bots.</p>
+
+<div style="text-align: center; margin: 30px 0;">
+    <svg viewBox="0 0 720 520" style="max-width: 700px; width: 100%; height: auto; font-family: Arial, sans-serif;">
+        <defs>
+            <marker id="arrowSL" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6" />
+            </marker>
+            <marker id="arrowGray" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8" />
+            </marker>
+            <marker id="arrowGreen" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#10b981" />
+            </marker>
+        </defs>
+
+        <!-- Column headers -->
+        <rect x="30" y="10" width="130" height="30" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5" />
+        <text x="95" y="30" text-anchor="middle" fill="#1e40af" font-size="11" font-weight="bold">hugo (student)</text>
+
+        <rect x="200" y="10" width="130" height="30" rx="6" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5" />
+        <text x="265" y="30" text-anchor="middle" fill="#991b1b" font-size="11" font-weight="bold">bot-alpha (DEAD)</text>
+
+        <rect x="380" y="10" width="130" height="30" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5" />
+        <text x="445" y="30" text-anchor="middle" fill="#1e40af" font-size="11" font-weight="bold">bot-bravo</text>
+        <text x="445" y="55" text-anchor="middle" fill="#64748b" font-size="10">rep = 0.70</text>
+
+        <rect x="560" y="10" width="130" height="30" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5" />
+        <text x="625" y="30" text-anchor="middle" fill="#1e40af" font-size="11" font-weight="bold">bot-charlie</text>
+        <text x="625" y="55" text-anchor="middle" fill="#64748b" font-size="10">rep = 0.85</text>
+
+        <!-- Lifelines -->
+        <line x1="95" y1="45" x2="95" y2="500" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4" />
+        <line x1="265" y1="45" x2="265" y2="500" stroke="#ef4444" stroke-width="1" stroke-dasharray="4,4" opacity="0.3" />
+        <line x1="445" y1="60" x2="445" y2="500" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4" />
+        <line x1="625" y1="60" x2="625" y2="500" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4" />
+
+        <!-- Step 1: hugo detects bot-alpha is dead -->
+        <rect x="25" y="80" width="140" height="25" rx="4" fill="#fef3c7" stroke="#f59e0b" stroke-width="1" />
+        <text x="95" y="97" text-anchor="middle" fill="#92400e" font-size="10">Heartbeat: alpha DEAD</text>
+
+        <!-- Step 2: hugo sends ELECTION to bravo and charlie -->
+        <line x1="160" y1="130" x2="435" y2="130" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowSL)" />
+        <text x="290" y="125" text-anchor="middle" fill="#1e40af" font-size="10" font-weight="bold">ELECTION (term=2)</text>
+
+        <line x1="160" y1="155" x2="615" y2="155" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowSL)" />
+        <text x="380" y="150" text-anchor="middle" fill="#1e40af" font-size="10" font-weight="bold">ELECTION (term=2)</text>
+
+        <!-- Cross mark on alpha -->
+        <text x="265" y="140" text-anchor="middle" fill="#ef4444" font-size="18" font-weight="bold">X</text>
+
+        <!-- Step 3: charlie sees it has higher rep than bravo, sends ELECTION to bravo -->
+        <rect x="560" y="175" width="130" height="25" rx="4" fill="#eff6ff" stroke="#60a5fa" stroke-width="1" />
+        <text x="625" y="192" text-anchor="middle" fill="#1d4ed8" font-size="10">My rep (0.85) highest</text>
+
+        <line x1="615" y1="220" x2="455" y2="220" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowSL)" />
+        <text x="535" y="215" text-anchor="middle" fill="#1e40af" font-size="10" font-weight="bold">ELECTION (term=2)</text>
+
+        <!-- Step 4: bravo sees charlie outranks it, stays quiet -->
+        <rect x="380" y="240" width="130" height="25" rx="4" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1" />
+        <text x="445" y="257" text-anchor="middle" fill="#64748b" font-size="10">rep 0.70 &lt; 0.85, yield</text>
+
+        <!-- Step 5: No OK received by charlie - it wins -->
+        <rect x="560" y="290" width="130" height="25" rx="4" fill="#d1fae5" stroke="#10b981" stroke-width="1" />
+        <text x="625" y="307" text-anchor="middle" fill="#059669" font-size="10" font-weight="bold">I AM LEADER</text>
+
+        <!-- Step 6: charlie broadcasts COORDINATOR -->
+        <line x1="615" y1="340" x2="105" y2="340" stroke="#10b981" stroke-width="2" marker-end="url(#arrowGreen)" />
+        <text x="360" y="335" text-anchor="middle" fill="#059669" font-size="10" font-weight="bold">COORDINATOR (term=2, leader=bot-charlie)</text>
+
+        <line x1="615" y1="365" x2="455" y2="365" stroke="#10b981" stroke-width="2" marker-end="url(#arrowGreen)" />
+        <text x="535" y="360" text-anchor="middle" fill="#059669" font-size="10" font-weight="bold">COORDINATOR</text>
+
+        <!-- Step 7: Result labels -->
+        <rect x="560" y="400" width="130" height="40" rx="6" fill="#d1fae5" stroke="#10b981" stroke-width="2" />
+        <text x="625" y="417" text-anchor="middle" fill="#059669" font-size="10" font-weight="bold">ACTIVE</text>
+        <text x="625" y="432" text-anchor="middle" fill="#059669" font-size="10">Payment Server</text>
+
+        <rect x="380" y="400" width="130" height="40" rx="6" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1" />
+        <text x="445" y="417" text-anchor="middle" fill="#64748b" font-size="10">STANDBY</text>
+        <text x="445" y="432" text-anchor="middle" fill="#64748b" font-size="10">(hot backup)</text>
+
+        <rect x="30" y="400" width="130" height="40" rx="6" fill="#eff6ff" stroke="#60a5fa" stroke-width="1" />
+        <text x="95" y="417" text-anchor="middle" fill="#1d4ed8" font-size="10">FOLLOWER</text>
+        <text x="95" y="432" text-anchor="middle" fill="#1d4ed8" font-size="10">Sends audits here</text>
+        <line x1="95" y1="440" x2="95" y2="460" stroke="#60a5fa" stroke-width="1" />
+        <line x1="95" y1="460" x2="615" y2="460" stroke="#60a5fa" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrowSL)" />
+        <text x="350" y="475" text-anchor="middle" fill="#64748b" font-size="10" font-style="italic">audit results go to bot-charlie now</text>
+
+        <text x="360" y="500" text-anchor="middle" fill="#94a3b8" font-size="11" font-style="italic">bot-charlie wins by reputation. The network routes payments to the most trusted bot.</text>
+    </svg>
+    <p style="color: #64748b; font-size: 13px; margin-top: 10px;">Payment Server failover: when bot-alpha crashes, bot-charlie wins the election because it has the highest reputation (0.85). Hugo now routes audit results to bot-charlie.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- NEW PROTOCOL MESSAGES -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">New Protocol Messages</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Three new message types added to <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">protocol.py</code>:</p>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Message</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Fields</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">ELECTION</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 12px;">sender, term, reputation_score</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">"I am starting an election, here is my score"</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">ELECTION_OK</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 12px;">sender, term, reputation_score</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">"I outrank you, back off"</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">COORDINATOR</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 12px;">sender, term</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">"I won, I am the leader for term T"</td>
+</tr>
+</tbody>
+</table>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- ARCHITECTURE -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Architecture: How It Fits</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Following the same modular pattern as our other algorithms, we add a new module:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">algorithms/
+  gossip.py        peer discovery
+  heartbeat.py     liveness detection
+  choking.py       bandwidth allocation
+  reputation.py    trust scoring
+  election.py      NEW: leader election</pre>
+</div>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">ElectionNode</code> class follows the exact same pattern as <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">HeartbeatNode</code>:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">class ElectionNode:
+    """Bully-based leader election with reputation weighting."""
+
+    def __init__(self, node_id, get_reputation_fn, get_alive_peers_fn):
+        self.node_id = node_id
+        self.state = "FOLLOWER"          # FOLLOWER | CANDIDATE | LEADER
+        self.current_leader = None
+        self.election_in_progress = False
+        self.term = 0                    # Election epoch number
+
+        # Injected dependencies (avoid circular imports)
+        self._get_reputation = get_reputation_fn
+        self._get_alive_peers = get_alive_peers_fn
+
+        # Timeout tracking
+        self.last_leader_heartbeat = time.time()
+        self.election_timeout = 30       # seconds
+        self._log = []</pre>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">What the Payment Server Leader Does</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Once elected, the active Payment Server has one exclusive job:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">def _handle_audit_result(self, msg):
+    # Every node receives audit results, but...
+    if self.election.current_leader == self.node_id:
+        # Only the active Payment Server processes the payout
+        self._process_payment(
+            content_id=msg["content_id"],
+            agreed_count=msg["agreed_count"],
+            confidence=msg["confidence"],
+        )
+    else:
+        # Standbys log the result (for consistency if they take over)
+        self._log(f"Audit logged (standby): ...")</pre>
+</div>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Students send their <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">AUDIT_RESULT</code> to the network. Only the elected Payment Server acts on it. The standbys record it so they have a complete ledger if they need to take over.</p>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- EDGE CASES -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Edge Cases and Tradeoffs</h2>
+
+<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #92400e; margin-top: 5px;">What if the network partitions?</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The Bully algorithm does <strong>not</strong> handle partitions gracefully. Two halves of the network could elect different leaders. For our 9-node classroom network, this is acceptable - real partition tolerance requires Raft's majority quorum.</p>
+</div>
+
+<div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">What if reputation scores are stale?</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Reputation updates propagate via gossip and periodic recalculation. There is a window where different nodes have slightly different reputation views. Tie-breaking by node ID makes this deterministic even when scores are close.</p>
+</div>
+
+<div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">What if the leader is alive but slow?</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">election_timeout</code> should be generous (30 seconds or more). Combined with the heartbeat module's SUSPECT state, we avoid thrashing between leaders when a node is just temporarily slow.</p>
+</div>
+
+<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #92400e; margin-top: 5px;">Flip-Flop Risk</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">If the highest-reputation node keeps crashing and recovering, it will keep winning elections and then crashing again. Mitigation: add a "cooldown" - a node that was leader and crashed cannot run for leader for N rounds after recovery.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- SUMMARY -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Summary</h2>
+
+<div style="background-color: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+<table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+<tbody>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Backstory</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Bots are Payment Servers; only one can be active to prevent double-paying creators</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Algorithm</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Bully with reputation weighting</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Candidates</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Only bots (bot-alpha, bot-bravo, bot-charlie) can be elected</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Trigger</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Any node's heartbeat detects the active Payment Server is DEAD</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Winner</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Highest reputation score among bots (tie-break by node ID)</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Messages</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">ELECTION, ELECTION_OK, COORDINATOR</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">New module</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">algorithms/election.py</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Key benefit</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Exactly one bot processes payments - no double-pay, no missed payments</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b;"><strong style="color: #1e40af;">Follows pattern</strong></td>
+<td style="padding: 8px 12px; color: #1e293b;">Same as HeartbeatNode, GossipNode, etc.</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Think About</h3>
+    <ul style="color: #1e293b; font-size: 15px; line-height: 1.8;">
+        <li>If bot-charlie is the active Payment Server and its reputation drops below bot-bravo's, should an election be triggered automatically? What are the tradeoffs of "preemptive" vs "failure-only" elections?</li>
+        <li>What happens if all three bots crash at the same time? How does this compare to having a single centralized payment server?</li>
+        <li>Why does adding reputation-weighting to the Bully algorithm make it better than plain Bully for our use case? What problem does reputation solve that node ID alone cannot?</li>
+    </ul>
+</div>
+
+</body>
+</html>
