@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>From Choking to HashCash: Proof-of-Work as Message Rate-Limiting</title>
+</head>
+
+<body>
+
+<!-- ============================================ -->
+<!-- INTRODUCTION -->
+<!-- ============================================ -->
+
+<div style="background-color: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">From Choking to HashCash: Proof-of-Work as Message Rate-Limiting</h2>
+    <p style="color: #1e293b; font-size: 16px; line-height: 1.6;">We have solved who I will serve (choking) and who I trust (reputation). But we have not solved a more fundamental problem: <strong>how expensive is it to talk?</strong></p>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Choking punishes free-riders after the fact. HashCash makes free-riding expensive before the fact. This is the difference between a bouncer who kicks you out and a cover charge that keeps you honest at the door.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- THE SPAM PROBLEM IN ADFLOW -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">The AdFlow Problem: Cheap Messages, Expensive Consequences</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Think about our current AdFlow network. Every node can send messages to the SQS queues of every other node. There is nothing stopping a malicious node from doing this:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">malicious_node floods the network:
+
+  AUDIT_RESULT(show:midnight-run, count=999999)  # Fake audit
+  AUDIT_RESULT(show:midnight-run, count=999999)  # Same fake, again
+  AUDIT_RESULT(show:midnight-run, count=999999)  # And again
+  ... 10,000 more in the next second ...
+
+  GOSSIP_ANNOUNCE(node_id=evil-node-1)  # Fake peer
+  GOSSIP_ANNOUNCE(node_id=evil-node-2)  # Another fake
+  GOSSIP_ANNOUNCE(node_id=evil-node-3)  # Sybil attack
+  ... 50,000 fake nodes announced ...</pre>
+</div>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Right now, sending an SQS message costs the sender <strong>nothing</strong>. JSON serialization is fast. Network calls are cheap. A single laptop can flood the entire AdFlow network with garbage messages in seconds.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">What Choking Does Not Solve</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Our existing <strong style="color: #1e40af;">choking algorithm</strong> is reactive. It tracks contributions over time and punishes peers who take without giving. But it has blind spots:</p>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Attack</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Does Choking Help?</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Why Not?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Message flooding</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">No</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Choking decides who I serve, not who can talk to me. Messages arrive before I decide to choke.</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Sybil attacks</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">No</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Creating fake identities is free. An attacker generates 100 node IDs and gossips them all.</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Fake audit results</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Sort of</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Reputation will eventually flag the liar, but the damage is done by the time choking kicks in.</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Resource exhaustion</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">No</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Even choked peers can fill my SQS queue, costing me polling time and CPU.</td>
+</tr>
+</tbody>
+</table>
+
+<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #92400e; margin-top: 5px;">The Core Insight</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong>Choking is a receiver-side defense.</strong> It controls who I serve. But it does not control who talks to me, or how often. We need a <strong style="color: #1e40af;">sender-side cost</strong> - something that makes it expensive to <em>produce</em> messages, not just expensive to get a response.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- ENTER HASHCASH -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Enter HashCash: Making Messages Expensive to Forge</h2>
+<p style="color: #64748b; font-size: 14px;">Adam Back, 1997</p>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">HashCash was originally invented to fight email spam. The idea is deceptively simple:</p>
+
+<div style="background-color: #d1fae5; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h4 style="color: #059669; margin-top: 5px;">The Big Idea</h4>
+    <p style="color: #1e293b; font-size: 16px; line-height: 1.6;"><strong>Before you send a message, you must burn CPU cycles to produce a proof that you spent real computational work.</strong> The recipient can verify this proof instantly. Sending one email? Trivial cost. Sending a million spam emails? Bankruptingly expensive.</p>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">How It Works: The Hash Puzzle</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">A <strong style="color: #1e40af;">cryptographic hash function</strong> like SHA-256 takes any input and produces a fixed-length output that looks random. Crucially, there is no shortcut - you cannot predict the output without actually computing the hash.</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">import hashlib
+
+message = "AUDIT_RESULT:show=midnight-run:count=1000:sender=hugo"
+
+# Try nonce = 0
+attempt = message + ":nonce=0"
+hash_0 = hashlib.sha256(attempt.encode()).hexdigest()
+# hash_0 = "a4f3e2c1..."  (random-looking, no leading zeros)
+
+# Try nonce = 1
+attempt = message + ":nonce=1"
+hash_1 = hashlib.sha256(attempt.encode()).hexdigest()
+# hash_1 = "8b29d0f7..."  (still no leading zeros)
+
+# Try nonce = 2
+attempt = message + ":nonce=2"
+hash_2 = hashlib.sha256(attempt.encode()).hexdigest()
+# hash_2 = "f17a90bc..."  (nope)
+
+# ... keep trying ...
+
+# Try nonce = 84,231
+attempt = message + ":nonce=84231"
+hash_n = hashlib.sha256(attempt.encode()).hexdigest()
+# hash_n = "00000a3f..."  FOUND IT! Starts with 5 zeros!</pre>
+</div>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong style="color: #1e40af;">The rule:</strong> Your message is only valid if its hash starts with a certain number of leading zeros. Finding such a hash requires brute-force guessing of the <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">nonce</code> value. There is no shortcut.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">The Asymmetry: Hard to Produce, Easy to Verify</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">This is the key property that makes HashCash useful:</p>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Operation</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Cost</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Who Pays</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Mining the proof</strong> (finding the nonce)</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Thousands to millions of hash attempts</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Sender</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Verifying the proof</strong> (checking the hash)</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Exactly 1 hash computation</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Receiver</td>
+</tr>
+</tbody>
+</table>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">A legitimate sender producing 1 message pays a small cost, maybe half a second of CPU time. A spammer trying to produce 10,000 messages pays <strong>10,000 times that cost</strong> - hours of computation for what should be a trivial script.</p>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- DIFFICULTY DIAL -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">The Difficulty Dial</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The number of leading zeros is the <strong style="color: #1e40af;">difficulty parameter</strong>. More zeros means more required work:</p>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Leading Zeros</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Avg. Attempts Needed</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Approx. Time (on a laptop)</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">1 ("0...")</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">16</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Instant</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Trivial proof, just forces the sender to hash at all</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">4 ("0000...")</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">65,536</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Less than a second</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #10b981;"><strong>Our AdFlow messages</strong></td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">5 ("00000...")</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">1,048,576</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">A few seconds</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Audit results (higher-value messages)</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">8 ("00000000...")</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">4,294,967,296</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Minutes to hours</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Bitcoin block production (roughly, before 2012)</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">19+ (current Bitcoin)</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Trillions</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">10 minutes (entire network combined)</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Global consensus</td>
+</tr>
+</tbody>
+</table>
+
+<div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Why Hex Zeros?</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Each hex character represents 4 bits. A leading zero in hex means 4 leading zero <em>bits</em>. So 4 hex zeros = 16 zero bits. Each additional zero bit doubles the average work needed - exactly like adding one more digit to a combination lock.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- APPLYING TO ADFLOW -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">HashCash in AdFlow: Stamped Messages</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Here is how HashCash applies to our P2P network. Every message sent through SQS must include a <strong style="color: #1e40af;">proof-of-work stamp</strong>. No stamp, no processing.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">The Message Format (Before and After)</h3>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">BEFORE (current - no proof required):
+{
+    "type": "AUDIT_RESULT",
+    "sender": "hugo",
+    "content_id": "midnight-run",
+    "agreed_count": 1000,
+    "confidence": 0.85,
+    "timestamp": 1711900000
+}
+
+AFTER (with HashCash stamp):
+{
+    "type": "AUDIT_RESULT",
+    "sender": "hugo",
+    "content_id": "midnight-run",
+    "agreed_count": 1000,
+    "confidence": 0.85,
+    "timestamp": 1711900000,
+    "pow": {
+        "nonce": 84231,
+        "difficulty": 4,
+        "hash": "0000a3f7e2b1c..."
+    }
+}</pre>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Sender Side: Mining the Stamp</h3>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">import hashlib, json
+
+def mine_stamp(message_body: dict, difficulty: int = 4) -> dict:
+    """
+    Find a nonce that makes the message hash start with `difficulty` zeros.
+    Returns the proof-of-work dict to attach to the message.
+    """
+    # Canonical serialization (sorted keys, no whitespace)
+    canonical = json.dumps(message_body, sort_keys=True, separators=(",", ":"))
+
+    nonce = 0
+    target_prefix = "0" * difficulty
+
+    while True:
+        attempt = f"{canonical}:{nonce}"
+        h = hashlib.sha256(attempt.encode()).hexdigest()
+        if h.startswith(target_prefix):
+            return {"nonce": nonce, "difficulty": difficulty, "hash": h}
+        nonce += 1</pre>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Receiver Side: Verifying the Stamp</h3>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">def verify_stamp(message_body: dict, pow_data: dict) -> bool:
+    """
+    Verify a proof-of-work stamp. One hash computation.
+    Returns True if the proof is valid.
+    """
+    canonical = json.dumps(message_body, sort_keys=True, separators=(",", ":"))
+    attempt = f"{canonical}:{pow_data['nonce']}"
+    h = hashlib.sha256(attempt.encode()).hexdigest()
+
+    # Check: does the hash actually start with enough zeros?
+    expected_prefix = "0" * pow_data["difficulty"]
+    return h.startswith(expected_prefix) and h == pow_data["hash"]</pre>
+</div>
+
+<div style="background-color: #d1fae5; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h4 style="color: #059669; margin-top: 5px;">The Asymmetry in Action</h4>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong>Sender (hugo):</strong> Ran ~65,000 hash attempts over half a second to mine the stamp.</p>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong>Receiver (bot-charlie):</strong> Ran exactly 1 hash to verify. Took microseconds.</p>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">For one message, this is barely noticeable. For 10,000 spam messages, the spammer needs <strong>9+ hours of CPU time</strong>.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- CHOKING VS HASHCASH DIAGRAM -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Two Layers of Defense</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Choking and HashCash are complementary. They defend different surfaces at different times:</p>
+
+<div style="text-align: center; margin: 30px 0;">
+    <svg viewBox="0 0 720 400" style="max-width: 700px; width: 100%; height: auto; font-family: Arial, sans-serif;">
+        <defs>
+            <marker id="arrowHC" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6" />
+            </marker>
+            <marker id="arrowRed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#ef4444" />
+            </marker>
+        </defs>
+
+        <text x="360" y="20" text-anchor="middle" fill="#64748b" font-size="12" font-weight="bold">TWO LAYERS OF DEFENSE</text>
+
+        <!-- Sender -->
+        <rect x="30" y="50" width="140" height="50" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="2" />
+        <text x="100" y="72" text-anchor="middle" fill="#1e40af" font-size="11" font-weight="bold">Sender</text>
+        <text x="100" y="90" text-anchor="middle" fill="#1e40af" font-size="10">(wants to send msg)</text>
+
+        <!-- Layer 1: HashCash -->
+        <rect x="230" y="40" width="260" height="70" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="2" />
+        <text x="360" y="60" text-anchor="middle" fill="#92400e" font-size="11" font-weight="bold">LAYER 1: HashCash (sender cost)</text>
+        <text x="360" y="78" text-anchor="middle" fill="#92400e" font-size="10">Must mine proof-of-work before</text>
+        <text x="360" y="93" text-anchor="middle" fill="#92400e" font-size="10">message can even be sent</text>
+
+        <line x1="170" y1="75" x2="220" y2="75" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowHC)" />
+
+        <!-- Arrow from Layer 1 to SQS -->
+        <line x1="490" y1="75" x2="540" y2="75" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowHC)" />
+
+        <!-- SQS -->
+        <rect x="550" y="55" width="100" height="40" rx="6" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5" />
+        <text x="600" y="80" text-anchor="middle" fill="#64748b" font-size="10">SQS Queue</text>
+
+        <!-- Arrow down from SQS -->
+        <line x1="600" y1="95" x2="600" y2="140" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowHC)" />
+
+        <!-- Receiver -->
+        <rect x="530" y="145" width="140" height="50" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="2" />
+        <text x="600" y="167" text-anchor="middle" fill="#1e40af" font-size="11" font-weight="bold">Receiver</text>
+        <text x="600" y="185" text-anchor="middle" fill="#1e40af" font-size="10">(polls queue)</text>
+
+        <!-- Arrow from Receiver to Verify -->
+        <line x1="600" y1="195" x2="600" y2="230" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowHC)" />
+
+        <!-- Verify step -->
+        <rect x="490" y="235" width="220" height="40" rx="6" fill="#eff6ff" stroke="#60a5fa" stroke-width="1.5" />
+        <text x="600" y="260" text-anchor="middle" fill="#1d4ed8" font-size="10" font-weight="bold">Verify PoW stamp (1 hash)</text>
+
+        <!-- Two branches: pass and fail -->
+        <!-- Pass -->
+        <line x1="560" y1="275" x2="460" y2="310" stroke="#10b981" stroke-width="2" marker-end="url(#arrowHC)" />
+        <!-- Fail -->
+        <line x1="640" y1="275" x2="710" y2="310" stroke="#ef4444" stroke-width="2" marker-end="url(#arrowRed)" />
+
+        <!-- Layer 2: Choking -->
+        <rect x="340" y="315" width="240" height="60" rx="8" fill="#d1fae5" stroke="#10b981" stroke-width="2" />
+        <text x="460" y="335" text-anchor="middle" fill="#059669" font-size="11" font-weight="bold">LAYER 2: Choking (receiver cost)</text>
+        <text x="460" y="353" text-anchor="middle" fill="#059669" font-size="10">Decides whether to serve</text>
+        <text x="460" y="368" text-anchor="middle" fill="#059669" font-size="10">this peer going forward</text>
+
+        <!-- Reject -->
+        <rect x="650" y="315" width="60" height="30" rx="6" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5" />
+        <text x="680" y="335" text-anchor="middle" fill="#991b1b" font-size="10" font-weight="bold">DROP</text>
+
+        <!-- Labels -->
+        <text x="360" y="395" text-anchor="middle" fill="#94a3b8" font-size="11" font-style="italic">HashCash filters before arrival. Choking filters after reputation builds.</text>
+    </svg>
+    <p style="color: #64748b; font-size: 13px; margin-top: 10px;">Messages must pass both layers: the proof-of-work gate (sender cost) and the choking/reputation gate (receiver discretion).</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- VARIABLE DIFFICULTY -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Variable Difficulty: Not All Messages Are Equal</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">In AdFlow, different message types have different consequences. A gossip announcement is low-stakes. An audit result that triggers a payment is high-stakes. The difficulty should reflect the stakes:</p>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Message Type</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Difficulty</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">GOSSIP_ANNOUNCE</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">2</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Low-stakes. Easy to disprove fake peers through heartbeat.</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">HEARTBEAT</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">2</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">High frequency, low cost. Must not slow down liveness detection.</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">VIEW_REPORT</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">4</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Ad-view claims directly affect revenue. Moderate cost to forge.</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">AUDIT_RESULT</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">5</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Triggers payments. High-value. Worth spending a few seconds per stamp.</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b; font-family: monospace; font-size: 13px;">ELECTION</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">4</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Rare event. Prevents an attacker from flooding election messages.</td>
+</tr>
+</tbody>
+</table>
+
+<div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Design Decision</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The network can agree on difficulty levels per message type through configuration. This is similar to how Bitcoin adjusts its block difficulty every 2,016 blocks - except we set it statically based on message importance rather than dynamically based on hashrate.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- THE STAMPCHAIN IDEA -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">From Stamps to Chains: The Road to Bitcoin</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">HashCash stamps individual messages. Each stamp is independent - it proves work was done for <em>that</em> message, and then it is forgotten. But what if we started linking stamps together?</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">HashCash (what we are doing now):
+  msg1 + nonce  -->  hash = "0000..."     (standalone stamp)
+  msg2 + nonce  -->  hash = "0000..."     (standalone stamp)
+  msg3 + nonce  -->  hash = "0000..."     (standalone stamp)
+
+What if we chained them?
+  msg1 + nonce                  -->  hash1 = "0000abc..."
+  msg2 + nonce + hash1          -->  hash2 = "0000def..."   (includes previous hash!)
+  msg3 + nonce + hash2          -->  hash3 = "0000789..."   (includes previous hash!)
+
+Now changing msg1 would BREAK hash2 AND hash3.</pre>
+</div>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">This is <strong style="color: #1e40af;">exactly what Bitcoin does</strong>. A blockchain is nothing more than a chain of HashCash stamps where each stamp commits to the entire history before it. We will explore this connection in detail when we cover distributed consensus.</p>
+
+<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #92400e; margin-top: 5px;">The Evolution</h3>
+    <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+    <tbody>
+    <tr>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #f59e0b;"><strong style="color: #1e40af;">Choking (BitTorrent, 2001)</strong></td>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #f59e0b;">"I will stop serving you if you do not contribute." Receiver-side punishment.</td>
+    </tr>
+    <tr>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #f59e0b;"><strong style="color: #1e40af;">HashCash (Back, 1997)</strong></td>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #f59e0b;">"You must prove you spent CPU time before I read your message." Sender-side cost.</td>
+    </tr>
+    <tr>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #f59e0b;"><strong style="color: #1e40af;">Bitcoin (Nakamoto, 2008)</strong></td>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #f59e0b;">"Chain the proofs together so the entire transaction history is protected by cumulative work." Consensus from proof-of-work.</td>
+    </tr>
+    </tbody>
+    </table>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6; margin-top: 15px;">Each step takes the same fundamental mechanism - hashing as a source of computational cost - and applies it to a bigger problem.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- PROPERTIES & TRADEOFFS -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Properties and Tradeoffs</h2>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Property</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">HashCash</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Decentralized</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #10b981;"><strong>Yes</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">No central authority needed. Any node can verify any stamp.</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Stateless verification</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #10b981;"><strong>Yes</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Receiver needs no history. Each stamp is self-contained proof.</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Replay protection</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Partial</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">The stamp is tied to the message content. Replaying the same message+stamp is valid unless the receiver tracks seen hashes.</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Fairness</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Imperfect</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">A machine with a fast CPU mines stamps faster. This favors wealthy attackers.</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Energy cost</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Low (per message)</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">At difficulty 4, the energy is negligible. At Bitcoin-scale difficulty, it is enormous.</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Sybil resistance</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #10b981;"><strong>Yes</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Creating 1,000 fake identities requires 1,000 stamps. Identity is no longer free.</td>
+</tr>
+</tbody>
+</table>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">The Fairness Problem (Why Bitcoin Invented Mining Pools)</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">HashCash has a structural weakness: <strong>it punishes the honest but slow</strong>. If a student's laptop takes 3 seconds to mine a stamp while a bot's server does it in 0.1 seconds, the system works well - the cost is proportional to the resources available. But what about an attacker with access to cloud GPUs? They could mine stamps orders of magnitude faster than legitimate participants.</p>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">This is acceptable for spam prevention (even fast hardware cannot send millions of stamped messages cheaply). It is <strong>not</strong> acceptable if proof-of-work is used for consensus - and this tension is exactly what led Bitcoin from "one stamp per message" to "one stamp per block, compete globally."</p>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- IMPLEMENTATION INTEGRATION -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Where It Fits: Integration with Our Codebase</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">HashCash is <strong>not</strong> a separate algorithm module like gossip or choking. It is a cross-cutting concern that touches the message layer itself. There are two integration points:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">node.py  _send_to_peer()
+  |
+  |  1. Build message dict
+  |  2. Mine PoW stamp        <-- NEW: stamp before sending
+  |  3. Attach pow field
+  |  4. Send to SQS
+  |
+  
+node.py  _process_message()
+  |
+  |  1. Receive from SQS
+  |  2. Verify PoW stamp      <-- NEW: reject if invalid
+  |  3. If invalid, drop + log
+  |  4. If valid, route to handler</pre>
+</div>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The implementation can live in a utility module:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">algorithms/
+  gossip.py        peer discovery
+  heartbeat.py     liveness detection
+  choking.py       bandwidth allocation (receiver-side)
+  reputation.py    trust scoring
+  election.py      leader election
+  hashcash.py      NEW: proof-of-work stamps (sender-side)</pre>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- DISCUSSION QUESTIONS -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Discussion: From Rate-Limiting to Consensus</h2>
+
+<div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Think About</h3>
+    <ul style="color: #1e293b; font-size: 15px; line-height: 1.8;">
+        <li><strong>Choking vs. HashCash:</strong> We said choking is "reactive" and HashCash is "proactive." Can you think of a real-world analogy? (Hint: think about highways and toll roads.)</li>
+        <li><strong>The Sybil connection:</strong> In our lab, creating a new node just means picking a new string as a node_id. If every GOSSIP_ANNOUNCE requires a difficulty-4 stamp, how does this change the cost of a Sybil attack? What if difficulty is set to 6?</li>
+        <li><strong>Timestamp freshness:</strong> If we include the timestamp in the hash input, what happens when a valid stamped message is replayed 10 minutes later? How would you add replay protection without needing a central server?</li>
+        <li><strong>The Bitcoin leap:</strong> HashCash stamps are per-message and independent. Bitcoin chains them and makes the entire network compete for one stamp every 10 minutes. What changes about the system properties when you go from "everyone mines their own stamps" to "everyone competes for one shared stamp"?</li>
+        <li><strong>Energy:</strong> At difficulty 4, our AdFlow HashCash burns negligible energy. Bitcoin currently uses as much electricity as some countries. At what point does proof-of-work become socially irresponsible? Is there a threshold?</li>
+    </ul>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- SUMMARY -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Summary</h2>
+
+<div style="background-color: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+<table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+<tbody>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Problem</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Messages are free to produce. This enables flooding, Sybil attacks, and fake audits.</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Solution</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">HashCash: attach a proof-of-work stamp to every message. Hard to produce, instant to verify.</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Mechanism</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Find a nonce such that SHA-256(message + nonce) starts with N leading zeros.</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Key property</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Asymmetric: costly to produce (brute force), cheap to verify (one hash).</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Complements</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Choking (receiver-side defense). HashCash + choking = defense at both ends.</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Origin</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Adam Back, 1997. Designed for email anti-spam.</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Where it leads</strong></td>
+<td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Chain the stamps together and you get a blockchain. Add global competition and you get Bitcoin.</td>
+</tr>
+<tr>
+<td style="padding: 8px 12px; color: #1e293b;"><strong style="color: #1e40af;">New module</strong></td>
+<td style="padding: 8px 12px; color: #1e293b;">algorithms/hashcash.py</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div style="background-color: #d1fae5; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h4 style="color: #059669; margin-top: 5px;">The One-Sentence Version</h4>
+    <p style="color: #1e293b; font-size: 16px; line-height: 1.6;"><strong>Choking answers "should I bother listening to you?" HashCash answers "did you bother doing the work to speak?"</strong></p>
+</div>
+
+</body>
+</html>
