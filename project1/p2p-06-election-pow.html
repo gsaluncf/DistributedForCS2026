@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Step 5: Leader Election and Proof-of-Work</title>
+</head>
+<body>
+
+<!-- INTRO -->
+<div style="background-color: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">Step 5: Leader Election and Proof-of-Work</h2>
+    <p style="color: #1e293b; font-size: 16px; line-height: 1.6;">Your node can gossip, heartbeat, choke, audit, and track reputation. Two problems remain: <strong>who processes payments?</strong> and <strong>how do we stop spam?</strong></p>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">This guide walks you through integrating two new systems into your node: <strong style="color: #1e40af;">Leader Election</strong> (selecting a single Payment Server) and <strong style="color: #1e40af;">HashCash Proof-of-Work</strong> (making messages expensive to forge).</p>
+</div>
+
+<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #92400e; margin-top: 5px;">Before You Start</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Pull the latest code from the repo. You should see these <strong>new files</strong>:</p>
+    <ul style="color: #1e293b; font-size: 15px; line-height: 1.8;">
+        <li><code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">algorithms/hashcash.py</code> - Proof-of-work stamp library</li>
+        <li><code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">algorithms/election.py</code> - Leader election module</li>
+        <li><code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">election_hashcash_sample.py</code> - Runnable demo (start here!)</li>
+    </ul>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">And these <strong>updated files</strong>:</p>
+    <ul style="color: #1e293b; font-size: 15px; line-height: 1.8;">
+        <li><code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">protocol.py</code> - 4 new message types added</li>
+        <li><code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">config.py</code> - 3 bots + new MESSAGE_TYPES</li>
+    </ul>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- PART A: THE PROBLEM -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Part A: The Two Problems</h2>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Problem 1: Who Pays the Creator?</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">When an audit concludes, someone needs to issue a <strong>PAYMENT</strong> to the content creator. If all three bots issue payments independently, the creator gets paid three times. If none of them do, the creator gets nothing.</p>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">We need exactly <strong>one bot</strong> to act as the <strong style="color: #1e40af;">Payment Server</strong> at any given time. If that bot crashes, another must take over. This is the <strong>leader election</strong> problem.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Problem 2: Messages Are Free to Send</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Right now, sending a message costs nothing. A malicious node can flood 10,000 fake AUDIT_RESULTs in seconds. Choking is reactive (receiver-side). We need a <strong>sender-side cost</strong> -- something that makes producing messages expensive. This is <strong>HashCash proof-of-work</strong>.</p>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- PART B: NEW MESSAGES -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Part B: Four New Message Types</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The protocol now has <strong>12 message types</strong> (up from 8). Here are the new four:</p>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Message</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Sent By</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; color: #1e293b;">ELECTION</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Bot starting election</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">"I want to be leader. Here is my reputation."</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; color: #1e293b;">ELECTION_OK</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Higher-ranked bot</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">"I outrank you. Back off, I will handle this."</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; color: #1e293b;">COORDINATOR</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Election winner</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">"I won. I am the Payment Server for term T."</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; color: #1e293b;">PAYMENT</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Active leader only</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">"Payment issued for content X based on audit Y."</td>
+</tr>
+</tbody>
+</table>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The builders are already in <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">protocol.py</code>:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">protocol.election(sender, term, reputation)        # ELECTION
+protocol.election_ok(sender, term, reputation)     # ELECTION_OK
+protocol.coordinator(sender, term)                 # COORDINATOR
+protocol.payment(sender, content_id, agreed_count, # PAYMENT
+                 amount, audit_ref="")</pre>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- PART C: HASHCASH STEP BY STEP -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Part C: Adding Proof-of-Work to Your Node</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The bots now <strong>verify incoming PoW stamps</strong> on VIEW_EVENT, AUDIT_RESULT, ELECTION, and PAYMENT messages. If your message lacks a valid stamp, the bot silently drops it. This means your node must stamp these messages before sending.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Step C.1: Add the import</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">At the top of <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">my_node.py</code>, add:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">from algorithms.hashcash import stamp_message, verify_message</pre>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Step C.2: Create a helper method</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Add this method to your <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">MyNode</code> class. It stamps a message with proof-of-work before sending it:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">def _stamp_and_send(self, target_id, msg):
+    """Stamp a message with PoW and send it."""
+    stamped = stamp_message(dict(msg))  # copy so we don't mutate original
+    if self.transport.send(target_id, stamped):
+        self.stats["messages_sent"] += 1
+        return True
+    return False</pre>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Step C.3: Use it when sending VIEW_EVENT and AUDIT_RESULT</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Everywhere you currently do <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">self.transport.send(peer, msg)</code> for a VIEW_EVENT or AUDIT_RESULT, replace it with:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;"># BEFORE (no proof-of-work):
+self.transport.send(peer, msg)
+
+# AFTER (with proof-of-work):
+self._stamp_and_send(peer, msg)</pre>
+</div>
+
+<div style="background-color: #d1fae5; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h4 style="color: #059669; margin-top: 5px;">Which messages need stamps?</h4>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong>Must stamp:</strong> VIEW_EVENT, AUDIT_RESULT (bots will drop these without PoW)</p>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong>Do not need stamps:</strong> HELLO, PEER_LIST, PING, PONG (bots accept these without PoW)</p>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Step C.4: (Optional) Verify incoming PoW</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">You can also verify stamps on messages you receive. This is optional but protects your node from spam:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">def _handle_view_event(self, msg):
+    sender = msg["sender"]
+
+    # Optional: verify proof-of-work
+    if "pow" in msg and not verify_message(msg):
+        self._log(f"[PoW] Dropped invalid VIEW_EVENT from {sender}")
+        return
+
+    # ... rest of your handler ...</pre>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Step C.5: Updated _do_publish example</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Here is a complete <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">_do_publish</code> with PoW:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">def _do_publish(self):
+    """Publish a VIEW_EVENT with proof-of-work stamp."""
+    content_id = random.choice(self.content_catalog)
+
+    # Increment your local count
+    if content_id not in self.local_counts:
+        self.local_counts[content_id] = 0
+    self.local_counts[content_id] += random.randint(80, 120)
+
+    msg = protocol.view_event(
+        sender=self.node_id,
+        event_id=f"{self.node_id}-{uuid.uuid4().hex[:8]}",
+        content_id=content_id,
+        count=self.local_counts[content_id],
+    )
+
+    # Send with PoW stamp to all alive peers
+    alive = self.heartbeat.get_alive_peers()
+    for peer_id in alive:
+        self._stamp_and_send(peer_id, msg)
+
+    self._log(f"Published {content_id} count={self.local_counts[content_id]} "
+              f"to {len(alive)} peers [PoW stamped]")</pre>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- PART D: ELECTION STEP BY STEP -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Part D: Handling Leader Election Messages</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The bots run leader election among themselves. Your student node does not need to participate in the election algorithm, but you <strong>must handle the messages</strong> so you know who the Payment Server is.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Step D.1: Add state tracking</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">In your <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">__init__</code>, add:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">def __init__(self, node_id, verbose=False):
+    super().__init__(node_id, verbose)
+
+    # ... your existing state ...
+
+    # Election tracking
+    self.current_payment_server = None   # who is the leader?
+    self.current_term = 0                # election epoch
+    self.payments_received = []          # log of payments</pre>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Step D.2: Add the four new handlers</h3>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">def _handle_election(self, msg):
+    """A bot is starting an election. Log it."""
+    sender = msg["sender"]
+    term = msg.get("term", 0)
+    rep = msg.get("reputation", 0.0)
+    self._log(f"[ELECTION] {sender} started election "
+              f"(term={term}, rep={rep:.2f})")
+
+def _handle_election_ok(self, msg):
+    """A higher-ranked bot responded. Log it."""
+    sender = msg["sender"]
+    self._log(f"[ELECTION] {sender} sent ELECTION_OK "
+              f"(outranks the challenger)")
+
+def _handle_coordinator(self, msg):
+    """A bot won the election. Track the new leader."""
+    sender = msg["sender"]
+    term = msg.get("term", 0)
+
+    if term >= self.current_term:
+        self.current_payment_server = sender
+        self.current_term = term
+        self._log(f"[ELECTION] New Payment Server: {sender} "
+                  f"(term={term})")
+    else:
+        self._log(f"[ELECTION] Ignored stale COORDINATOR from "
+                  f"{sender} (term={term} < {self.current_term})")
+
+def _handle_payment(self, msg):
+    """The Payment Server issued a payment. Log it."""
+    sender = msg["sender"]
+    content_id = msg.get("content_id", "?")
+    amount = msg.get("amount", 0.0)
+    agreed = msg.get("agreed_count", 0)
+
+    self.payments_received.append({
+        "from": sender,
+        "content_id": content_id,
+        "amount": amount,
+        "agreed_count": agreed,
+    })
+
+    self._log(f"[PAYMENT] {sender} paid ${amount:.4f} for "
+              f"{content_id} ({agreed} verified views)")</pre>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Step D.3: Wire them into handle_message</h3>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Your base class <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">node.py</code> dispatches messages by type. You need to add the new types to its dispatch table. If you override <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">handle_message()</code>, add these cases:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">def handle_message(self, msg):
+    """Dispatch messages, including the 4 new types."""
+    msg_type = msg.get("type")
+    sender = msg.get("sender", "?")
+
+    if sender == self.node_id:
+        return
+
+    self.stats["messages_received"] += 1
+
+    # Refresh gossip TTL
+    if sender in self.gossip.peers:
+        self.gossip.peers[sender].ttl = 5
+
+    handlers = {
+        # Original 8
+        "HELLO":        self._handle_hello,
+        "PEER_LIST":    self._handle_peer_list,
+        "PING":         self._handle_ping,
+        "PONG":         self._handle_pong,
+        "VIEW_EVENT":   self._handle_view_event,
+        "AUDIT_RESULT": self._handle_audit_result,
+        "CHOKE":        self._handle_choke,
+        "UNCHOKE":      self._handle_unchoke,
+        # New 4
+        "ELECTION":     self._handle_election,
+        "ELECTION_OK":  self._handle_election_ok,
+        "COORDINATOR":  self._handle_coordinator,
+        "PAYMENT":      self._handle_payment,
+    }
+
+    handler = handlers.get(msg_type)
+    if handler:
+        if self.verbose:
+            self._log(f"<- [{msg_type}] {sender}")
+        handler(msg)
+    else:
+        self._log(f"Unknown message type: {msg_type}")</pre>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- PART E: HOW ELECTION WORKS -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Part E: How the Election Works (For Your Understanding)</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The bots use a <strong style="color: #1e40af;">Reputation-Weighted Bully Algorithm</strong>. Here is the sequence:</p>
+
+<!-- SVG SWIMLANE DIAGRAM -->
+<div style="text-align: center; margin: 30px 0;">
+    <svg viewBox="0 0 720 460" style="max-width: 700px; width: 100%; height: auto; font-family: Arial, sans-serif;">
+        <defs>
+            <marker id="arrBlue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6" />
+            </marker>
+            <marker id="arrGreen" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#10b981" />
+            </marker>
+            <marker id="arrRed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#ef4444" />
+            </marker>
+        </defs>
+
+        <!-- Column headers -->
+        <rect x="20" y="10" width="160" height="35" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="100" y="33" text-anchor="middle" fill="#1e40af" font-size="12" font-weight="bold">bot-alpha (rep=0.95)</text>
+
+        <rect x="280" y="10" width="160" height="35" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="360" y="33" text-anchor="middle" fill="#1e40af" font-size="12" font-weight="bold">bot-bravo (rep=0.70)</text>
+
+        <rect x="540" y="10" width="160" height="35" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="620" y="33" text-anchor="middle" fill="#1e40af" font-size="12" font-weight="bold">bot-charlie (rep=0.85)</text>
+
+        <!-- Lifelines -->
+        <line x1="100" y1="45" x2="100" y2="440" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+        <line x1="360" y1="45" x2="360" y2="440" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+        <line x1="620" y1="45" x2="620" y2="440" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+
+        <!-- Step 1: Alpha crashes -->
+        <rect x="60" y="65" width="80" height="25" rx="4" fill="#fee2e2" stroke="#ef4444" stroke-width="1"/>
+        <text x="100" y="82" text-anchor="middle" fill="#991b1b" font-size="10" font-weight="bold">CRASHES</text>
+
+        <!-- Step 2: Bravo detects, sends ELECTION -->
+        <text x="360" y="110" text-anchor="middle" fill="#64748b" font-size="10" font-style="italic">detects alpha is dead</text>
+
+        <!-- Bravo -> Charlie: ELECTION -->
+        <line x1="370" y1="125" x2="610" y2="145" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrBlue)"/>
+        <text x="490" y="128" text-anchor="middle" fill="#1e40af" font-size="10">ELECTION (term=1, rep=0.70)</text>
+
+        <!-- Charlie -> Bravo: ELECTION_OK -->
+        <line x1="610" y1="170" x2="370" y2="190" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arrBlue)"/>
+        <text x="490" y="175" text-anchor="middle" fill="#92400e" font-size="10">ELECTION_OK (rep=0.85)</text>
+
+        <!-- Charlie note: no higher bots alive -->
+        <text x="620" y="220" text-anchor="middle" fill="#64748b" font-size="10" font-style="italic">no higher-rep bot alive</text>
+        <text x="620" y="235" text-anchor="middle" fill="#64748b" font-size="10" font-style="italic">timeout: I win</text>
+
+        <!-- Charlie state change -->
+        <rect x="560" y="250" width="120" height="25" rx="4" fill="#d1fae5" stroke="#10b981" stroke-width="1.5"/>
+        <text x="620" y="267" text-anchor="middle" fill="#059669" font-size="10" font-weight="bold">state = LEADER</text>
+
+        <!-- Charlie -> Bravo: COORDINATOR -->
+        <line x1="610" y1="295" x2="370" y2="315" stroke="#10b981" stroke-width="1.5" marker-end="url(#arrGreen)"/>
+        <text x="490" y="298" text-anchor="middle" fill="#059669" font-size="10">COORDINATOR (term=1)</text>
+
+        <!-- Charlie -> You: COORDINATOR -->
+        <text x="620" y="345" text-anchor="middle" fill="#10b981" font-size="10" font-weight="bold">broadcasts to ALL peers</text>
+        <text x="620" y="360" text-anchor="middle" fill="#64748b" font-size="10">(including your node)</text>
+
+        <!-- Payment flow -->
+        <rect x="540" y="380" width="160" height="45" rx="6" fill="#eff6ff" stroke="#60a5fa" stroke-width="1.5"/>
+        <text x="620" y="398" text-anchor="middle" fill="#1d4ed8" font-size="10" font-weight="bold">Only charlie processes</text>
+        <text x="620" y="413" text-anchor="middle" fill="#1d4ed8" font-size="10">audits into PAYMENT msgs</text>
+    </svg>
+</div>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Step</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">What Happens</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Algorithm Detail</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>1</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Heartbeat detects leader is dead</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">No PONG from leader for 90 seconds</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>2</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">A bot sends ELECTION to higher-reputation bots</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Bully: only challenges bots that outrank you</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>3</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Higher-rep bots respond with ELECTION_OK</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Tie-break: higher node ID wins if reps are equal</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>4</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Highest-rep bot gets no OK, declares itself leader</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">15-second timeout, then self-promote</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>5</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Winner broadcasts COORDINATOR to all peers</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Includes term number to prevent stale overwrites</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>6</strong></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Only the leader processes audits into PAYMENTs</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Standby bots log audits but do not pay</td>
+</tr>
+</tbody>
+</table>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- PART F: DIFFICULTY LEVELS -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Part F: PoW Difficulty Levels</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Not all messages are equal. Higher-stakes messages require more proof-of-work:</p>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Message Type</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Difficulty</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Avg Attempts</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Bot Verifies?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; color: #1e293b;">HELLO, PING, PONG, PEER_LIST</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">2</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">~256</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #10b981;"><strong>No</strong> (exempt)</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; color: #1e293b;">VIEW_EVENT, ELECTION</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">3</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">~4,096</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Yes</strong></td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; font-family: monospace; color: #1e293b;">AUDIT_RESULT, PAYMENT</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">4</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">~65,536</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;"><strong>Yes</strong></td>
+</tr>
+</tbody>
+</table>
+
+<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #92400e; margin-top: 5px;">Key Takeaway</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">stamp_message(msg)</code> automatically picks the right difficulty based on the message type. You do not need to specify it manually.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- PART G: UPDATED print_status -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Part G: Updated print_status</h2>
+
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Update your status output to show the election and payment state:</p>
+
+<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
+<pre style="margin: 0;">def print_status(self):
+    super().print_status()
+    print(f"  Payment Server: {self.current_payment_server or 'unknown'}")
+    print(f"  Election term:  {self.current_term}")
+    print(f"  Payments seen:  {len(self.payments_received)}")
+    for p in self.payments_received[-3:]:  # last 3
+        print(f"    ${p['amount']:.4f} for {p['content_id']} "
+              f"from {p['from']}")</pre>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- PART H: CHECKLIST -->
+<!-- ============================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Part H: Completion Checklist</h2>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #cbd5e1;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 12px; text-align: center; border: 1px solid #cbd5e1; color: #1e40af; width: 40px;">#</th>
+<th style="padding: 12px; text-align: left; border: 1px solid #cbd5e1; color: #1e40af;">Task</th>
+<th style="padding: 12px; text-align: center; border: 1px solid #cbd5e1; color: #1e40af; width: 80px;">Required?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #1e293b;">1</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Import <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">stamp_message</code> and <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">verify_message</code></td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #10b981;"><strong>Yes</strong></td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #1e293b;">2</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Add <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">_stamp_and_send()</code> helper method</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #10b981;"><strong>Yes</strong></td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #1e293b;">3</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Stamp VIEW_EVENT and AUDIT_RESULT before sending</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #10b981;"><strong>Yes</strong></td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #1e293b;">4</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Handle <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">COORDINATOR</code> messages (track Payment Server)</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #10b981;"><strong>Yes</strong></td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #1e293b;">5</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Handle <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">PAYMENT</code> messages (log payment records)</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #10b981;"><strong>Yes</strong></td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #1e293b;">6</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Handle <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">ELECTION</code> and <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">ELECTION_OK</code> (log them)</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #64748b;">Recommended</td>
+</tr>
+<tr>
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #1e293b;">7</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Verify incoming PoW on VIEW_EVENT / AUDIT_RESULT</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #64748b;">Optional</td>
+</tr>
+<tr style="background-color: #f8fafc;">
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #1e293b;">8</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; color: #1e293b;">Update <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">print_status()</code> with election/payment info</td>
+<td style="padding: 12px; border: 1px solid #cbd5e1; text-align: center; color: #64748b;">Optional</td>
+</tr>
+</tbody>
+</table>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================ -->
+<!-- SUMMARY -->
+<!-- ============================================ -->
+
+<div style="background-color: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+    <h2 style="color: #1e40af; margin-top: 5px;">Summary</h2>
+    <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+    <tbody>
+    <tr>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd; width: 120px;"><strong style="color: #1e40af;">Problem 1</strong></td>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Multiple bots, only one should pay. Solution: elect a leader.</td>
+    </tr>
+    <tr>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Problem 2</strong></td>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Messages are free. Solution: attach proof-of-work stamps.</td>
+    </tr>
+    <tr>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">Algorithm</strong></td>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">Reputation-Weighted Bully: highest-reputation bot wins the election.</td>
+    </tr>
+    <tr>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">PoW</strong></td>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">SHA-256 HashCash. Find nonce so hash starts with N zeros. Hard to produce, instant to verify.</td>
+    </tr>
+    <tr>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;"><strong style="color: #1e40af;">New messages</strong></td>
+    <td style="padding: 8px 12px; color: #1e293b; border-bottom: 1px solid #93c5fd;">ELECTION, ELECTION_OK, COORDINATOR, PAYMENT</td>
+    </tr>
+    <tr>
+    <td style="padding: 8px 12px; color: #1e293b;"><strong style="color: #1e40af;">Your job</strong></td>
+    <td style="padding: 8px 12px; color: #1e293b;">Stamp outgoing VIEW_EVENT/AUDIT_RESULT. Handle COORDINATOR and PAYMENT.</td>
+    </tr>
+    </tbody>
+    </table>
+</div>
+
+<div style="background-color: #d1fae5; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h4 style="color: #059669; margin-top: 5px;">Try It Now</h4>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Run the sample code to see everything working (no AWS needed):</p>
+    <div style="background-color: #1e293b; color: #e2e8f0; padding: 10px; border-radius: 6px; margin-top: 10px; font-family: monospace; font-size: 13px;">
+    <pre style="margin: 0;">python election_hashcash_sample.py</pre>
+    </div>
+</div>
+
+</body>
+</html>
