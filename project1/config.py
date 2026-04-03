@@ -14,7 +14,7 @@ ACCOUNT_ID = "194722398367"
 PREFIX = "ds2032"
 
 # Students
-STUDENTS = ["hugo", "phin", "sam", "bilge", "manuel"]
+STUDENTS = ["hugo", "phin", "sam", "bilge", "manuel", "bruno"]
 
 # Instructor
 INSTRUCTOR = "gil"
@@ -50,6 +50,10 @@ MESSAGE_TYPES = [
     "AUDIT_RESULT",  # 2032 audit: a node's count/agreement for a content_id
     "CHOKE",         # Choking: I'm stopping service to you
     "UNCHOKE",       # Choking: I'm resuming service to you
+    "ELECTION",      # Leader election: "I am starting an election"
+    "ELECTION_OK",   # Leader election: "I outrank you, back off"
+    "COORDINATOR",   # Leader election: "I won, I am the leader"
+    "PAYMENT",       # Payment: confirmation from the elected Payment Server
 ]
 
 # ---------------------------------------------------------------------------
