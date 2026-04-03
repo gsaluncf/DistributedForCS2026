@@ -66,7 +66,7 @@ def _canonical(msg_body: Dict[str, Any]) -> str:
     invalidates the hash.  We strip the 'pow' field itself so the receiver
     can re-derive the same canonical form.
     """
-    clean = {k: v for k, v in msg_body.items() if k != "pow"}
+    clean = {k: v for k, v in msg_body.items() if k not in ("pow", "_receipt_handle")}
     return json.dumps(clean, sort_keys=True, separators=(",", ":"))
 
 
