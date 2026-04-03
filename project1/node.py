@@ -225,6 +225,10 @@ class P2PNode:
             protocol.AUDIT_RESULT: self._handle_audit_result,
             protocol.CHOKE:        self._handle_choke,
             protocol.UNCHOKE:      self._handle_unchoke,
+            protocol.ELECTION:     self._handle_election,
+            protocol.ELECTION_OK:  self._handle_election_ok,
+            protocol.COORDINATOR:  self._handle_coordinator,
+            protocol.PAYMENT:      self._handle_payment,
         }
 
         handler = handlers.get(msg_type)
@@ -269,6 +273,22 @@ class P2PNode:
 
     def _handle_unchoke(self, msg: Dict[str, Any]) -> None:
         """Override in MyNode."""
+        pass
+
+    def _handle_election(self, msg: Dict[str, Any]) -> None:
+        """Override in MyNode: a bot started an election."""
+        pass
+
+    def _handle_election_ok(self, msg: Dict[str, Any]) -> None:
+        """Override in MyNode: a higher-ranked bot responded."""
+        pass
+
+    def _handle_coordinator(self, msg: Dict[str, Any]) -> None:
+        """Override in MyNode: a bot won the election."""
+        pass
+
+    def _handle_payment(self, msg: Dict[str, Any]) -> None:
+        """Override in MyNode: the Payment Server issued a payment."""
         pass
 
     # ------------------------------------------------------------------
