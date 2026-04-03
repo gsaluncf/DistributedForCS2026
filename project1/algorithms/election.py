@@ -54,11 +54,11 @@ class ElectionNode:
         self.election_in_progress: bool = False
         self._election_start: float = 0.0
         self._got_ok: bool = False
-        self.election_timeout: float = 15.0  # seconds to wait for OK
+        self.election_timeout: float = 8.0   # seconds to wait for OK
 
         # Last time we heard from the leader (heartbeat or COORDINATOR msg)
         self.last_leader_contact: float = time.time()
-        self.leader_timeout: float = 90.0  # seconds before declaring leader dead
+        self.leader_timeout: float = 15.0  # seconds before declaring leader dead
 
         # Injected dependencies
         self._get_reputation = get_reputation_fn
