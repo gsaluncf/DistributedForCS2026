@@ -270,50 +270,14 @@ def _handle_payment(self, msg):
               f"{content_id} ({agreed} verified views)")</pre>
 </div>
 
-<h3 style="color: #1d4ed8; margin-top: 25px;">Step D.3: Wire them into handle_message</h3>
+<h3 style="color: #1d4ed8; margin-top: 25px;">Step D.3: That is it -- they are already wired</h3>
 
-<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Your base class <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">node.py</code> dispatches messages by type. You need to add the new types to its dispatch table. If you override <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">handle_message()</code>, add these cases:</p>
-
-<div style="background-color: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; font-size: 13px;">
-<pre style="margin: 0;">def handle_message(self, msg):
-    """Dispatch messages, including the 4 new types."""
-    msg_type = msg.get("type")
-    sender = msg.get("sender", "?")
-
-    if sender == self.node_id:
-        return
-
-    self.stats["messages_received"] += 1
-
-    # Refresh gossip TTL
-    if sender in self.gossip.peers:
-        self.gossip.peers[sender].ttl = 5
-
-    handlers = {
-        # Original 8
-        "HELLO":        self._handle_hello,
-        "PEER_LIST":    self._handle_peer_list,
-        "PING":         self._handle_ping,
-        "PONG":         self._handle_pong,
-        "VIEW_EVENT":   self._handle_view_event,
-        "AUDIT_RESULT": self._handle_audit_result,
-        "CHOKE":        self._handle_choke,
-        "UNCHOKE":      self._handle_unchoke,
-        # New 4
-        "ELECTION":     self._handle_election,
-        "ELECTION_OK":  self._handle_election_ok,
-        "COORDINATOR":  self._handle_coordinator,
-        "PAYMENT":      self._handle_payment,
-    }
-
-    handler = handlers.get(msg_type)
-    if handler:
-        if self.verbose:
-            self._log(f"<- [{msg_type}] {sender}")
-        handler(msg)
-    else:
-        self._log(f"Unknown message type: {msg_type}")</pre>
+<div style="background-color: #d1fae5; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The updated <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">node.py</code> base class already routes the 4 new message types to your handlers automatically. You do <strong>not</strong> need to override <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">handle_message()</code>. Just add the four handler methods from Step D.2 to your <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px;">MyNode</code> class and they will be called when the bots send these messages to you.</p>
 </div>
+
+
+
 
 <hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
 
