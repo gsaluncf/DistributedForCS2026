@@ -224,16 +224,18 @@ def election_ok(sender: str, term: int, reputation: float) -> Dict[str, Any]:
     return msg
 
 
-def coordinator(sender: str, term: int) -> Dict[str, Any]:
+def coordinator(sender: str, term: int, reputation: float = 0.0) -> Dict[str, Any]:
     """
     COORDINATOR -- "I won the election."
     Broadcast by the winning bot after an election concludes.
 
     Fields:
-      term: the term for which this node is now leader
+      term:       the term for which this node is now leader
+      reputation: the leader's reputation score (for verification)
     """
     msg = _base(COORDINATOR, sender)
     msg["term"] = term
+    msg["reputation"] = round(reputation, 4)
     return msg
 
 
