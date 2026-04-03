@@ -2,7 +2,7 @@
 P2P Message Protocol
 ====================
 
-Builders and parsers for the 8 P2P message types.
+Builders and parsers for the 12 P2P message types.
 All messages are JSON dicts sent as SQS message bodies.
 
 Every message has:
@@ -32,7 +32,18 @@ AUDIT_RESULT = "AUDIT_RESULT"
 CHOKE = "CHOKE"
 UNCHOKE = "UNCHOKE"
 
-ALL_TYPES = [HELLO, PEER_LIST, PING, PONG, VIEW_EVENT, AUDIT_RESULT, CHOKE, UNCHOKE]
+# Leader Election
+ELECTION = "ELECTION"
+ELECTION_OK = "ELECTION_OK"
+COORDINATOR = "COORDINATOR"
+
+# Payment (issued by elected Payment Server)
+PAYMENT = "PAYMENT"
+
+ALL_TYPES = [
+    HELLO, PEER_LIST, PING, PONG, VIEW_EVENT, AUDIT_RESULT, CHOKE, UNCHOKE,
+    ELECTION, ELECTION_OK, COORDINATOR, PAYMENT,
+]
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +192,76 @@ def unchoke(sender: str) -> Dict[str, Any]:
     return _base(UNCHOKE, sender)
 
 
+# --- Leader Election messages ---
+
+def election(sender: str, term: int, reputation: float) -> Dict[str, Any]:
+    """
+    ELECTION -- start or participate in an election.
+    Sent to higher-ranking bots when the current leader is detected as dead.
+
+    Fields:
+      term:       election epoch number
+      reputation: sender's current reputation/trust score
+    """
+    msg = _base(ELECTION, sender)
+    msg["term"] = term
+    msg["reputation"] = round(reputation, 4)
+    return msg
+
+
+def election_ok(sender: str, term: int, reputation: float) -> Dict[str, Any]:
+    """
+    ELECTION_OK -- "I outrank you, back off."
+    Response to an ELECTION message from a higher-ranked node.
+
+    Fields:
+      term:       current election term
+      reputation: responder's reputation score
+    """
+    msg = _base(ELECTION_OK, sender)
+    msg["term"] = term
+    msg["reputation"] = round(reputation, 4)
+    return msg
+
+
+def coordinator(sender: str, term: int) -> Dict[str, Any]:
+    """
+    COORDINATOR -- "I won the election."
+    Broadcast by the winning bot after an election concludes.
+
+    Fields:
+      term: the term for which this node is now leader
+    """
+    msg = _base(COORDINATOR, sender)
+    msg["term"] = term
+    return msg
+
+
+def payment(
+    sender: str,
+    content_id: str,
+    agreed_count: int,
+    amount: float,
+    audit_ref: str = "",
+) -> Dict[str, Any]:
+    """
+    PAYMENT -- payment confirmation from the elected Payment Server.
+    Only the active leader should issue these.
+
+    Fields:
+      content_id:   which content is being paid for
+      agreed_count: the verified view count from the audit
+      amount:       payment amount (in network credits)
+      audit_ref:    reference to the AUDIT_RESULT msg_id
+    """
+    msg = _base(PAYMENT, sender)
+    msg["content_id"] = content_id
+    msg["agreed_count"] = agreed_count
+    msg["amount"] = round(amount, 4)
+    msg["audit_ref"] = audit_ref
+    return msg
+
+
 # ---------------------------------------------------------------------------
 # Pretty printing
 # ---------------------------------------------------------------------------
@@ -203,7 +284,14 @@ def format_msg(msg: Dict[str, Any], compact: bool = False) -> str:
             extra = f" content={msg.get('content_id', '?')} count={msg.get('count', '?')}"
         elif t == AUDIT_RESULT:
             extra = f" content={msg.get('content_id', '?')} agreed={msg.get('agreed_count', '?')}"
-        return f"[{t}] {s} ({mid}){extra}"
+        elif t in (ELECTION, ELECTION_OK):
+            extra = f" term={msg.get('term', '?')} rep={msg.get('reputation', '?')}"
+        elif t == COORDINATOR:
+            extra = f" term={msg.get('term', '?')}"
+        elif t == PAYMENT:
+            extra = f" content={msg.get('content_id', '?')} amount={msg.get('amount', '?')}"
+        pow_tag = " [PoW]" if "pow" in msg else ""
+        return f"[{t}] {s} ({mid}){extra}{pow_tag}"
     else:
         return json.dumps(msg, indent=2)
 
@@ -228,6 +316,11 @@ if __name__ == "__main__":
         audit_result("hugo", content_id="video-42", agreed_count=150, confidence=0.92, voters=["sam", "phin"]),
         choke("hugo"),
         unchoke("hugo"),
+        # New message types
+        election("bot-bravo", term=3, reputation=0.85),
+        election_ok("bot-alpha", term=3, reputation=0.95),
+        coordinator("bot-alpha", term=3),
+        payment("bot-alpha", content_id="video-42", agreed_count=150, amount=1.50, audit_ref="abc123"),
     ]
 
     for msg in messages:
