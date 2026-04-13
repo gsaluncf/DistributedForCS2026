@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Week 7 – Replication: Why Copies Break Everything</title>
+</head>
+<body>
+
+<div style="background-color: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">Week 7 – Replication: Why Copies Break Everything</h2>
+    <p style="color: #1e293b;">If one copy of the data is good, more copies should be better — right? This week we learn why the answer is "it depends," and why the cost of keeping copies consistent is often the hardest problem in a distributed system.</p>
+    <p style="color: #1e293b;"><strong style="color: #1e40af;">Reading:</strong> Sections 7.1 through 7.6 (~40 pages). We will spend the most time on 7.1 (why replicate), 7.3 (client-centric consistency), and 7.6 (caching and replication in the web).</p>
+</div>
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Two Reasons to Replicate</h2>
+
+<p style="color: #1e293b;">There are really only two reasons you would go through the trouble of maintaining multiple copies of the same data: <strong style="color: #1e40af;">reliability</strong> and <strong style="color: #1e40af;">performance</strong>.</p>
+
+<p style="color: #1e293b;"><strong style="color: #1e40af;">Reliability</strong> is the simpler motivation. If you have three copies of a file and one server crashes, you switch to another. You can even detect corruption: if two out of three copies return the same value, you trust the majority. The more copies you have, the harder it is for a single failure to take you down.</p>
+
+<p style="color: #1e293b;"><strong style="color: #1e40af;">Performance</strong> is about distance and load. Imagine a single server in Virginia serving users in Tokyo, São Paulo, and Berlin. Every request has to cross an ocean. That round-trip latency is physics — you cannot make light travel faster. But you <em>can</em> put a copy of the data on a server in each region. Now reads are fast because the data is nearby. And if a thousand users are all requesting the same data, you can spread that load across multiple servers instead of overwhelming one.</p>
+
+<!-- SVG: Basic replication — origin + replicas near users -->
+<div style="text-align: center; margin: 25px 0;">
+<svg viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg" style="max-width: 100%; height: auto;">
+  <!-- Origin server -->
+  <rect x="265" y="20" width="170" height="60" rx="8" fill="#1e40af" stroke="#1e3a8a" stroke-width="2"/>
+  <text x="350" y="48" text-anchor="middle" fill="white" font-family="sans-serif" font-size="14" font-weight="bold">ORIGIN SERVER</text>
+  <text x="350" y="66" text-anchor="middle" fill="#bfdbfe" font-family="sans-serif" font-size="11">data = v3</text>
+
+  <!-- Arrows from origin to replicas -->
+  <line x1="290" y1="80" x2="120" y2="140" stroke="#3b82f6" stroke-width="2" stroke-dasharray="6,4"/>
+  <polygon points="120,140 130,132 126,143" fill="#3b82f6"/>
+  <line x1="350" y1="80" x2="350" y2="140" stroke="#3b82f6" stroke-width="2" stroke-dasharray="6,4"/>
+  <polygon points="350,140 344,128 356,128" fill="#3b82f6"/>
+  <line x1="410" y1="80" x2="580" y2="140" stroke="#3b82f6" stroke-width="2" stroke-dasharray="6,4"/>
+  <polygon points="580,140 570,132 574,143" fill="#3b82f6"/>
+
+  <text x="350" y="120" text-anchor="middle" fill="#3b82f6" font-family="sans-serif" font-size="11" font-style="italic">propagate updates</text>
+
+  <!-- Replica A -->
+  <rect x="30" y="145" width="170" height="55" rx="8" fill="#dbeafe" stroke="#93c5fd" stroke-width="2"/>
+  <text x="115" y="170" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="13" font-weight="bold">Replica A</text>
+  <text x="115" y="188" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="11">data = v3</text>
+
+  <!-- Replica B -->
+  <rect x="265" y="145" width="170" height="55" rx="8" fill="#dbeafe" stroke="#93c5fd" stroke-width="2"/>
+  <text x="350" y="170" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="13" font-weight="bold">Replica B</text>
+  <text x="350" y="188" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="11">data = v3</text>
+
+  <!-- Replica C -->
+  <rect x="500" y="145" width="170" height="55" rx="8" fill="#dbeafe" stroke="#93c5fd" stroke-width="2"/>
+  <text x="585" y="170" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="13" font-weight="bold">Replica C</text>
+  <text x="585" y="188" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="11">data = v3</text>
+
+  <!-- Users below replicas -->
+  <text x="115" y="230" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="20">👤</text>
+  <text x="115" y="250" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="10">Users in EU</text>
+  <text x="350" y="230" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="20">👤</text>
+  <text x="350" y="250" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="10">Users in US</text>
+  <text x="585" y="230" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="20">👤</text>
+  <text x="585" y="250" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="10">Users in Asia</text>
+</svg>
+<p style="color: #64748b; font-size: 0.9em; margin-top: 5px;"><em>The basic idea: one origin, multiple replicas closer to users. Reads are fast — but keeping all copies in sync costs network traffic and time.</em></p>
+</div>
+
+<p style="color: #1e293b;">Both motivations sound obviously good. So what goes wrong?</p>
+
+<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">The Fundamental Problem</h3>
+    <p style="color: #1e293b;">The moment someone modifies the data on <em>one</em> copy, that copy is now different from all the others. To get back to a consistent state, the modification has to be carried out on every copy. <strong style="color: #1e40af;">Exactly when and how those modifications happen determines the price of replication.</strong> Everything else in this chapter is really about that one trade-off.</p>
+</div>
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">The Access-to-Update Ratio: A Real-World Intuition</h2>
+
+<p style="color: #1e293b;">Before we get into consistency models and protocols, there is one number that can tell you immediately whether replication is a good idea for a particular piece of data: the <strong style="color: #1e40af;">access-to-update ratio</strong>.</p>
+
+<p style="color: #1e293b;">Here is the idea. Imagine a piece of data that is read N times per second but updated M times per second. Every update has to be propagated to every replica — that costs network bandwidth and time. If N is much larger than M (lots of reads, few updates), those propagation costs are spread across many useful reads. The investment pays off. But if N is close to M, or worse, M is larger than N, then you are constantly shipping updates to replicas that nobody is reading. You are spending more on keeping copies fresh than you are saving on faster reads.</p>
+
+<!-- SVG: Access-to-update ratio comparison -->
+<div style="text-align: center; margin: 25px 0;">
+<svg viewBox="0 0 700 300" xmlns="http://www.w3.org/2000/svg" style="max-width: 100%; height: auto;">
+  <!-- Left side: HIGH ratio -->
+  <text x="175" y="25" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="14" font-weight="bold">HIGH Ratio — Cache It</text>
+  <text x="175" y="42" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="11">(e.g., Wikipedia article, profile photo)</text>
+
+  <text x="30" y="78" fill="#475569" font-family="sans-serif" font-size="12">Reads</text>
+  <rect x="75" y="65" width="250" height="20" rx="4" fill="#3b82f6"/>
+  <text x="200" y="80" text-anchor="middle" fill="white" font-family="sans-serif" font-size="11" font-weight="bold">1,000,000 / day</text>
+
+  <text x="18" y="112" fill="#475569" font-family="sans-serif" font-size="12">Updates</text>
+  <rect x="75" y="99" width="12" height="20" rx="4" fill="#f59e0b"/>
+  <text x="95" y="114" fill="#475569" font-family="sans-serif" font-size="11">3 / day</text>
+
+  <rect x="60" y="132" width="230" height="32" rx="6" fill="#dcfce7" stroke="#86efac" stroke-width="1.5"/>
+  <text x="175" y="153" text-anchor="middle" fill="#166534" font-family="sans-serif" font-size="12" font-weight="bold">Replicate aggressively. Updates are rare.</text>
+
+  <!-- Divider -->
+  <line x1="350" y1="10" x2="350" y2="170" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Right side: LOW ratio -->
+  <text x="525" y="25" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="14" font-weight="bold">LOW Ratio — Think Twice</text>
+  <text x="525" y="42" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="11">(e.g., stock ticker, live game score)</text>
+
+  <text x="380" y="78" fill="#475569" font-family="sans-serif" font-size="12">Reads</text>
+  <rect x="425" y="65" width="100" height="20" rx="4" fill="#3b82f6"/>
+  <text x="475" y="80" text-anchor="middle" fill="white" font-family="sans-serif" font-size="11" font-weight="bold">500 / sec</text>
+
+  <text x="368" y="112" fill="#475569" font-family="sans-serif" font-size="12">Updates</text>
+  <rect x="425" y="99" width="200" height="20" rx="4" fill="#f59e0b"/>
+  <text x="525" y="114" text-anchor="middle" fill="white" font-family="sans-serif" font-size="11" font-weight="bold">100 / sec</text>
+
+  <rect x="395" y="132" width="260" height="32" rx="6" fill="#fef2f2" stroke="#fca5a5" stroke-width="1.5"/>
+  <text x="525" y="153" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="12" font-weight="bold">Most updates never read. Bandwidth wasted.</text>
+
+  <!-- Bottom summary -->
+  <rect x="50" y="195" width="600" height="90" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="350" y="220" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="13" font-weight="bold">The ratio tells you whether copies pay for themselves.</text>
+  <text x="350" y="242" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="12">High ratio (reads ≫ updates) → replicate widely, cache aggressively</text>
+  <text x="350" y="262" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="12">Low ratio (updates ≈ reads) → replication is expensive, consider alternatives</text>
+</svg>
+</div>
+
+<p style="color: #1e293b;">This is not abstract. Think about data you interact with every day:</p>
+
+<ul style="color: #1e293b;">
+    <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">A Wikipedia article about World War II.</strong> Read millions of times a day, edited maybe a few times a week. Enormous ratio. Cache it on servers all over the world. The occasional edit is cheap to push out.</li>
+    <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">A stock ticker for a heavily traded company.</strong> The price updates many times per second. Even if thousands of people are watching, the data changes so fast that any cached copy is stale almost immediately. If you replicate it to ten edge servers, you are shipping ten updates per second to each one — and most of those updates will be superseded before anyone reads them.</li>
+    <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">Your profile picture on a social platform.</strong> You change it once every few months. It is loaded every time someone sees one of your posts — potentially thousands of times a day. Extremely high ratio. This is the kind of data that CDNs were born to cache.</li>
+    <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">A collaborative Google Doc being edited by five people.</strong> Every keystroke is an update, and every collaborator needs to see every change almost instantly. The ratio is roughly 1:1. Caching will not help here — you need a completely different synchronization strategy that keeps everyone's view of the document current in real time.</li>
+</ul>
+
+<p style="color: #1e293b;">The simplest example is web caching. Your browser stores a local copy of a page for fast access. That cached copy has an excellent access-to-update ratio — you visit the page many times, and it rarely changes. But if the page <em>does</em> change on the server, your cached copy is now wrong. The server could notify every browser cache of every change, but tracking millions of caches is expensive. This is the core tension: caching makes reads fast but makes freshness hard.</p>
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">What Does "Consistent" Even Mean?</h2>
+
+<p style="color: #1e293b;">Once you have multiple copies, you have to decide what "correct" means. If someone reads from Replica A and someone else reads from Replica B at the same time, do they have to see the same thing? Always? Sometimes? What if a user writes to one replica and then reads from another — do they have to see their own write?</p>
+
+<p style="color: #1e293b;">The answer is: it depends on what <strong style="color: #1e40af;">consistency model</strong> you choose. A consistency model is a contract between the system and its users. It says: "here is what we guarantee about the relationship between writes and reads." Stronger guarantees mean more predictable behavior for users, but they cost more to implement because the replicas have to coordinate more tightly.</p>
+
+<p style="color: #1e293b;">The key insight is that <strong style="color: #1e40af;">consistency is not a binary — it is a spectrum</strong>. At one end, every replica is always perfectly identical (very expensive). At the other end, replicas can be arbitrarily out of date (very cheap but confusing for users). Most real systems live somewhere in the middle.</p>
+
+<!-- SVG: Consistency spectrum -->
+<div style="text-align: center; margin: 25px 0;">
+<svg viewBox="0 0 700 160" xmlns="http://www.w3.org/2000/svg" style="max-width: 100%; height: auto;">
+  <defs>
+    <linearGradient id="spectrumGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#22c55e"/>
+      <stop offset="50%" style="stop-color:#f59e0b"/>
+      <stop offset="100%" style="stop-color:#ef4444"/>
+    </linearGradient>
+  </defs>
+  <rect x="60" y="40" width="580" height="24" rx="12" fill="url(#spectrumGrad)"/>
+
+  <text x="60" y="30" text-anchor="start" fill="#166534" font-family="sans-serif" font-size="11" font-weight="bold">EVENTUAL</text>
+  <text x="60" y="82" text-anchor="start" fill="#64748b" font-family="sans-serif" font-size="10">Fast, cheap</text>
+  <text x="60" y="95" text-anchor="start" fill="#64748b" font-family="sans-serif" font-size="10">May be stale</text>
+
+  <text x="255" y="30" text-anchor="middle" fill="#92400e" font-family="sans-serif" font-size="11" font-weight="bold">CLIENT-CENTRIC</text>
+  <text x="255" y="82" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="10">Per-user guarantees</text>
+  <text x="255" y="95" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="10">Moderate cost</text>
+
+  <text x="460" y="30" text-anchor="middle" fill="#b45309" font-family="sans-serif" font-size="11" font-weight="bold">SEQUENTIAL</text>
+  <text x="460" y="82" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="10">Global ordering</text>
+  <text x="460" y="95" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="10">Expensive</text>
+
+  <text x="640" y="30" text-anchor="end" fill="#991b1b" font-family="sans-serif" font-size="11" font-weight="bold">TIGHT / SYNC</text>
+  <text x="640" y="82" text-anchor="end" fill="#64748b" font-family="sans-serif" font-size="10">All copies identical</text>
+  <text x="640" y="95" text-anchor="end" fill="#64748b" font-family="sans-serif" font-size="10">Very expensive</text>
+
+  <line x1="60" y1="37" x2="60" y2="67" stroke="#166534" stroke-width="2"/>
+  <line x1="255" y1="37" x2="255" y2="67" stroke="#92400e" stroke-width="2"/>
+  <line x1="460" y1="37" x2="460" y2="67" stroke="#b45309" stroke-width="2"/>
+  <line x1="640" y1="37" x2="640" y2="67" stroke="#991b1b" stroke-width="2"/>
+
+  <text x="350" y="130" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="12" font-weight="bold">← Cheaper / weaker guarantees          Stronger guarantees / more expensive →</text>
+  <text x="350" y="150" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="11">Most real systems live somewhere in the middle.</text>
+</svg>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">The Strongest Guarantee (and Why It Is Expensive)</h3>
+
+<p style="color: #1e293b;">At the far right of the spectrum is <strong style="color: #1e40af;">tight consistency</strong> (also called synchronous replication). This means that when someone writes a value, the write is applied to <em>every single copy</em> as a single atomic operation before anything else can happen. No one can read any copy until all copies agree.</p>
+
+<p style="color: #1e293b;">Think about what this requires. You post a photo. Before the app can even show you a confirmation, the system has to contact servers in Virginia, Frankfurt, Tokyo, and São Paulo, wait for all of them to acknowledge the write, and only <em>then</em> tell you it worked. If one server is slow or unreachable, everything waits. If the network between two data centers hiccups, all writes globally stall. You get perfect consistency, but you pay for it in latency and fragility. This is why almost no large-scale internet application uses tight consistency for everything.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Continuous Consistency: How Wrong Is Acceptable?</h3>
+
+<p style="color: #1e293b;">An interesting idea from the reading is <strong style="color: #1e40af;">conits</strong> (consistency units) — a way to specify exactly <em>how much</em> replicas are allowed to disagree. You can set bounds along three dimensions:</p>
+
+<ul style="color: #1e293b;">
+    <li style="margin-bottom: 6px;"><strong style="color: #1e40af;">Numerical deviation:</strong> How far apart can the values be? (Useful for things like account balances where small discrepancies might be tolerable.)</li>
+    <li style="margin-bottom: 6px;"><strong style="color: #1e40af;">Staleness:</strong> How old can a copy be? This is the one you encounter most often. When your browser shows a cached web page, it is accepting a staleness bound — a page that is five minutes old is probably fine; five days old is probably not.</li>
+    <li style="margin-bottom: 6px;"><strong style="color: #1e40af;">Ordering deviation:</strong> How many writes can be "pending" at one replica that other replicas have not seen yet?</li>
+</ul>
+
+<p style="color: #1e293b;">The practical value of conits is that they turn consistency from a yes/no question into a tunable parameter. Instead of "are the replicas consistent?" you ask "are the replicas consistent <em>enough</em> for this particular use case?"</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Client-Centric Consistency: What One User Sees</h3>
+
+<p style="color: #1e293b;">There is a different way to think about consistency that turns out to be very practical. Instead of asking "do all replicas agree?" — which is expensive — you ask: "does this <em>one user</em> have a coherent experience as they move between replicas?"</p>
+
+<p style="color: #1e293b;">This matters because in most real systems, a user does not stay connected to one server forever. A load balancer might route your first request to a server in Virginia and your second request to a server in Oregon. If those two servers have different versions of the data, <em>your</em> experience might be confusing even if the system as a whole is working fine.</p>
+
+<p style="color: #1e293b;">There are four guarantees that matter here, and two of them come up constantly in practice:</p>
+
+<p style="color: #1e293b;"><strong style="color: #1e40af;">Monotonic reads</strong> means that once you have seen a value, you never see an older one. Think about checking your bank balance. You see $500. You pull down to refresh. Now it shows $480 (a charge went through). You refresh again — and it shows $500 again. That third read is the problem. The value went <em>backward</em>. The second server you hit had an older copy of the data than the first one. A system that guarantees monotonic reads will never let this happen — it ensures that any server you are sent to has at least the version you already saw.</p>
+
+<p style="color: #1e293b;"><strong style="color: #1e40af;">Read-your-writes</strong> means that after you write something, your own subsequent reads will reflect that write. You update your display name from "alice99" to "Alice Chen." You reload the page. It still says "alice99." What happened? Your write went to one server, but your read was routed to a different server that had not received the update yet. This is surprisingly common — it happens any time a load balancer sends consecutive requests to different replicas.</p>
+
+<!-- SVG: Read-your-writes violation -->
+<div style="text-align: center; margin: 25px 0;">
+<svg viewBox="0 0 700 310" xmlns="http://www.w3.org/2000/svg" style="max-width: 100%; height: auto;">
+  <text x="350" y="22" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="15" font-weight="bold">Read-Your-Writes Violation</text>
+
+  <line x1="60" y1="55" x2="640" y2="55" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="60" y="48" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="10">time →</text>
+
+  <!-- Step 1: User writes to Origin -->
+  <rect x="80" y="70" width="160" height="50" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+  <text x="160" y="90" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="12" font-weight="bold">Server 1</text>
+  <text x="160" y="106" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="11">name = "Alice Chen"</text>
+
+  <text x="160" y="148" text-anchor="middle" fill="#1e293b" font-family="sans-serif" font-size="18">👤</text>
+  <line x1="160" y1="130" x2="160" y2="120" stroke="#3b82f6" stroke-width="2"/>
+  <polygon points="160,120 155,128 165,128" fill="#3b82f6"/>
+  <text x="160" y="168" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="10" font-weight="bold">WRITE "Alice Chen"</text>
+
+  <line x1="240" y1="95" x2="380" y2="95" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6,4"/>
+  <text x="310" y="88" text-anchor="middle" fill="#f59e0b" font-family="sans-serif" font-size="10" font-style="italic">propagating...</text>
+
+  <!-- Step 2: User reads from a different server -->
+  <rect x="400" y="70" width="160" height="50" rx="6" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+  <text x="480" y="90" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="12" font-weight="bold">Server 2</text>
+  <text x="480" y="106" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="11">name = "alice99"</text>
+
+  <text x="480" y="148" text-anchor="middle" fill="#1e293b" font-family="sans-serif" font-size="18">👤</text>
+  <line x1="480" y1="120" x2="480" y2="130" stroke="#ef4444" stroke-width="2"/>
+  <polygon points="480,130 475,122 485,122" fill="#ef4444"/>
+  <text x="480" y="168" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="10" font-weight="bold">READ → sees old name!</text>
+
+  <rect x="290" y="140" width="100" height="24" rx="4" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="340" y="157" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="10">load balancer</text>
+  <line x1="210" y1="150" x2="290" y2="152" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+  <line x1="390" y1="152" x2="440" y2="150" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+
+  <rect x="80" y="195" width="540" height="105" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="350" y="218" text-anchor="middle" fill="#1e293b" font-family="sans-serif" font-size="12" font-weight="bold">What happened?</text>
+  <text x="350" y="240" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="12">Alice updated her display name on Server 1.</text>
+  <text x="350" y="258" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="12">A load balancer routed her next request to Server 2,</text>
+  <text x="350" y="276" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="12">which hadn't received the update yet. She doesn't see her own change.</text>
+  <text x="350" y="294" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="11" font-weight="bold">This is a read-your-writes violation.</text>
+</svg>
+</div>
+
+<!-- SVG: Monotonic reads violation -->
+<div style="text-align: center; margin: 25px 0;">
+<svg viewBox="0 0 700 300" xmlns="http://www.w3.org/2000/svg" style="max-width: 100%; height: auto;">
+  <text x="350" y="22" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="15" font-weight="bold">Monotonic Reads Violation</text>
+
+  <line x1="60" y1="50" x2="640" y2="50" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="60" y="43" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="10">time →</text>
+
+  <rect x="80" y="65" width="150" height="50" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+  <text x="155" y="85" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="12" font-weight="bold">Server 1</text>
+  <text x="155" y="101" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="11">balance = $480</text>
+
+  <text x="155" y="143" text-anchor="middle" fill="#1e293b" font-family="sans-serif" font-size="18">👤</text>
+  <line x1="155" y1="115" x2="155" y2="125" stroke="#3b82f6" stroke-width="2"/>
+  <polygon points="155,125 150,117 160,117" fill="#3b82f6"/>
+  <text x="155" y="163" text-anchor="middle" fill="#3b82f6" font-family="sans-serif" font-size="10" font-weight="bold">READ → $480 ✓</text>
+
+  <line x1="250" y1="140" x2="380" y2="140" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <polygon points="380,140 372,135 372,145" fill="#94a3b8"/>
+  <text x="315" y="133" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="10" font-style="italic">user refreshes</text>
+
+  <rect x="400" y="65" width="150" height="50" rx="6" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+  <text x="475" y="85" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="12" font-weight="bold">Server 2</text>
+  <text x="475" y="101" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="11">balance = $500</text>
+
+  <text x="475" y="143" text-anchor="middle" fill="#1e293b" font-family="sans-serif" font-size="18">👤</text>
+  <line x1="475" y1="115" x2="475" y2="125" stroke="#ef4444" stroke-width="2"/>
+  <polygon points="475,125 470,117 480,117" fill="#ef4444"/>
+  <text x="475" y="163" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="10" font-weight="bold">READ → $500 ✗</text>
+
+  <rect x="240" y="177" width="220" height="30" rx="6" fill="#fef2f2" stroke="#fca5a5" stroke-width="1.5"/>
+  <text x="350" y="197" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="12" font-weight="bold">$480 → $500 — value went backward!</text>
+
+  <rect x="80" y="220" width="540" height="70" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="350" y="243" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="12">The user saw $480 (after a charge processed), then refreshed and saw $500.</text>
+  <text x="350" y="261" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="12">Server 2 had an older copy that hadn't received the charge yet. The balance appeared to go up.</text>
+  <text x="350" y="279" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="11" font-weight="bold">This is a monotonic reads violation.</text>
+</svg>
+</div>
+
+<p style="color: #1e293b;">The other two client-centric guarantees are <strong style="color: #1e40af;">monotonic writes</strong> (your writes are applied everywhere in the order you issued them — so no replica ever shows your correction without the original post) and <strong style="color: #1e40af;">writes-follow-reads</strong> (if you read an article and then post a reply, no replica will store your reply without also storing the article you replied to).</p>
+
+<p style="color: #1e293b;">The important thing to notice about all four of these guarantees is that they are about the experience of a <em>single user moving between replicas</em>. They do not require every replica in the system to agree with every other replica at all times. That is what makes them much cheaper to implement than tight consistency — and why so many real systems rely on them.</p>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Replication in the Real Web: CDNs and Edge Caching</h2>
+
+<p style="color: #1e293b;">Let us take everything we have discussed — replication, the access-to-update ratio, consistency trade-offs — and see how it plays out in one of the most important real-world distributed systems: <strong style="color: #1e40af;">content delivery networks</strong> (CDNs).</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">The Problem CDNs Solve</h3>
+
+<p style="color: #1e293b;">Imagine you run a popular news website. Your database and application servers live in a single data center in Virginia. A reader in Berlin requests your homepage. That request has to travel across the Atlantic, hit your server, generate a response (which might require database queries), and travel all the way back. Round-trip latency alone might be 100–150 milliseconds, plus however long the server takes to process the request. Multiply that by millions of users worldwide, and you have a performance problem that no amount of server optimization can fully solve — because the bottleneck is the speed of light across an ocean.</p>
+
+<p style="color: #1e293b;">The CDN solution is replication. You deploy <strong style="color: #1e40af;">edge servers</strong> in cities around the world — Berlin, Tokyo, São Paulo, Sydney. These edge servers hold copies of your content. When the reader in Berlin requests your homepage, a CDN routes them to the nearest edge server instead of your origin. The page loads fast because the data is close.</p>
+
+<p style="color: #1e293b;">But here is the question that should immediately come to mind after this week's reading: <strong style="color: #1e40af;">what exactly do you put on those edge servers, and how do you keep it fresh?</strong></p>
+
+<p style="color: #1e293b;">The reading describes three strategies, and each one makes a fundamentally different trade-off between how much the edge server knows, how much storage it uses, and how hard it is to keep consistent with the origin.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Strategy 1: Full Replication</h3>
+
+<p style="color: #1e293b;">The most straightforward approach: copy the entire origin database to every edge server. Every query can be answered locally because the edge has all the data. Reads are fast. Complex queries that need to join multiple tables work fine because the full dataset is right there.</p>
+
+<p style="color: #1e293b;">The catch is updates. Every time a row changes in the origin database, that change has to be propagated across a wide-area network to every edge server. If your site publishes ten articles a day, this is fine — the update traffic is minimal. But if your site processes thousands of user-generated comments per minute, you are constantly shipping updates across oceans to dozens of edge servers, many of which might not even have users requesting that data. The access-to-update ratio is the deciding factor.</p>
+
+<!-- SVG: Full Replication -->
+<div style="text-align: center; margin: 25px 0;">
+<svg viewBox="0 0 700 280" xmlns="http://www.w3.org/2000/svg" style="max-width: 100%; height: auto;">
+  <text x="350" y="20" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="14" font-weight="bold">Strategy 1: Full Replication</text>
+
+  <rect x="255" y="35" width="190" height="65" rx="8" fill="#1e40af" stroke="#1e3a8a" stroke-width="2"/>
+  <text x="350" y="58" text-anchor="middle" fill="white" font-family="sans-serif" font-size="13" font-weight="bold">ORIGIN SERVER</text>
+  <text x="350" y="76" text-anchor="middle" fill="#bfdbfe" font-family="sans-serif" font-size="10">Table A | Table B | Table C</text>
+  <text x="350" y="90" text-anchor="middle" fill="#bfdbfe" font-family="sans-serif" font-size="10">Table D | Table E | Table F</text>
+
+  <line x1="280" y1="100" x2="120" y2="145" stroke="#3b82f6" stroke-width="2"/>
+  <polygon points="120,145 132,140 128,150" fill="#3b82f6"/>
+  <line x1="350" y1="100" x2="350" y2="145" stroke="#3b82f6" stroke-width="2"/>
+  <polygon points="350,145 344,133 356,133" fill="#3b82f6"/>
+  <line x1="420" y1="100" x2="580" y2="145" stroke="#3b82f6" stroke-width="2"/>
+  <polygon points="580,145 568,140 572,150" fill="#3b82f6"/>
+
+  <text x="195" y="118" text-anchor="middle" fill="#3b82f6" font-family="sans-serif" font-size="10" font-style="italic">full copy</text>
+  <text x="370" y="128" text-anchor="start" fill="#3b82f6" font-family="sans-serif" font-size="10" font-style="italic">full copy</text>
+  <text x="505" y="118" text-anchor="middle" fill="#3b82f6" font-family="sans-serif" font-size="10" font-style="italic">full copy</text>
+
+  <rect x="25" y="150" width="190" height="55" rx="8" fill="#dbeafe" stroke="#93c5fd" stroke-width="2"/>
+  <text x="120" y="173" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="12" font-weight="bold">Edge – Berlin</text>
+  <text x="120" y="192" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="10">A | B | C | D | E | F</text>
+
+  <rect x="255" y="150" width="190" height="55" rx="8" fill="#dbeafe" stroke="#93c5fd" stroke-width="2"/>
+  <text x="350" y="173" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="12" font-weight="bold">Edge – Tokyo</text>
+  <text x="350" y="192" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="10">A | B | C | D | E | F</text>
+
+  <rect x="485" y="150" width="190" height="55" rx="8" fill="#dbeafe" stroke="#93c5fd" stroke-width="2"/>
+  <text x="580" y="173" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="12" font-weight="bold">Edge – São Paulo</text>
+  <text x="580" y="192" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="10">A | B | C | D | E | F</text>
+
+  <rect x="100" y="225" width="220" height="45" rx="6" fill="#dcfce7" stroke="#86efac" stroke-width="1"/>
+  <text x="210" y="245" text-anchor="middle" fill="#166534" font-family="sans-serif" font-size="11" font-weight="bold">✓ Any query answered locally</text>
+  <text x="210" y="261" text-anchor="middle" fill="#166534" font-family="sans-serif" font-size="11">✓ Complex joins work at the edge</text>
+
+  <rect x="380" y="225" width="220" height="45" rx="6" fill="#fef2f2" stroke="#fca5a5" stroke-width="1"/>
+  <text x="490" y="245" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="11" font-weight="bold">✗ Every update → all edges</text>
+  <text x="490" y="261" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="11">✗ Fails if updates are frequent</text>
+</svg>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Strategy 2: Content-Aware Caching</h3>
+
+<p style="color: #1e293b;">Instead of copying everything, the edge server only stores data that users actually request — but it stores it in a <em>structured</em> way. The edge maintains a small local database organized around <strong style="color: #1e40af;">query templates</strong>: predefined patterns like "get user profile where id = ?" or "get top 10 posts where category = ?".</p>
+
+<p style="color: #1e293b;">When a request arrives, the edge checks whether it matches a template and whether the local database has the data needed to answer it. This is called a <strong style="color: #1e40af;">query containment check</strong> — essentially asking "can I answer this without calling home?" If yes, it responds instantly. If not, it forwards the query to the origin, stores the response locally, and returns it to the user. Next time someone asks a similar question, the edge can answer it directly.</p>
+
+<p style="color: #1e293b;">The trade-off: this is much more storage-efficient than full replication because the edge only holds data people actually care about. But it introduces two new costs. First, the origin server has to track what each edge has cached so it can send <strong style="color: #1e40af;">invalidation messages</strong> when the underlying data changes. ("Hey Berlin, the article you cached was just edited — throw out your copy.") Second, the edge server needs real computational power because it is not just serving static files — it is running database queries.</p>
+
+<!-- SVG: Content-Aware Caching -->
+<div style="text-align: center; margin: 25px 0;">
+<svg viewBox="0 0 700 310" xmlns="http://www.w3.org/2000/svg" style="max-width: 100%; height: auto;">
+  <text x="350" y="20" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="14" font-weight="bold">Strategy 2: Content-Aware Caching</text>
+
+  <text x="80" y="80" text-anchor="middle" fill="#1e293b" font-family="sans-serif" font-size="24">👤</text>
+  <text x="80" y="100" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="10">User</text>
+
+  <line x1="110" y1="78" x2="190" y2="78" stroke="#3b82f6" stroke-width="2"/>
+  <polygon points="190,78 182,73 182,83" fill="#3b82f6"/>
+  <text x="150" y="70" text-anchor="middle" fill="#3b82f6" font-family="sans-serif" font-size="9">query</text>
+
+  <rect x="195" y="40" width="220" height="100" rx="8" fill="#dbeafe" stroke="#93c5fd" stroke-width="2"/>
+  <text x="305" y="62" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="13" font-weight="bold">EDGE SERVER</text>
+  <text x="305" y="80" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="10">Template: "GET user WHERE id=?"</text>
+  <text x="305" y="95" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="10">Template: "GET posts WHERE topic=?"</text>
+  <rect x="210" y="103" width="190" height="22" rx="4" fill="#eff6ff" stroke="#60a5fa" stroke-width="1"/>
+  <text x="305" y="118" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="10" font-weight="bold">Query containment check</text>
+
+  <polygon points="500,65 540,80 500,95 460,80" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="500" y="84" text-anchor="middle" fill="#92400e" font-family="sans-serif" font-size="10" font-weight="bold">Match?</text>
+
+  <line x1="415" y1="80" x2="460" y2="80" stroke="#94a3b8" stroke-width="1.5"/>
+  <polygon points="460,80 452,75 452,85" fill="#94a3b8"/>
+
+  <text x="500" y="55" text-anchor="middle" fill="#166534" font-family="sans-serif" font-size="10" font-weight="bold">YES</text>
+  <line x1="500" y1="65" x2="500" y2="42" stroke="#22c55e" stroke-width="2"/>
+  <polygon points="500,42 495,50 505,50" fill="#22c55e"/>
+  <rect x="445" y="22" width="110" height="20" rx="4" fill="#dcfce7" stroke="#86efac" stroke-width="1"/>
+  <text x="500" y="36" text-anchor="middle" fill="#166534" font-family="sans-serif" font-size="10">Return cached</text>
+
+  <text x="548" y="84" text-anchor="start" fill="#991b1b" font-family="sans-serif" font-size="10" font-weight="bold">NO</text>
+  <line x1="540" y1="80" x2="570" y2="80" stroke="#ef4444" stroke-width="2"/>
+
+  <rect x="575" y="55" width="100" height="50" rx="6" fill="#1e40af" stroke="#1e3a8a" stroke-width="2"/>
+  <text x="625" y="77" text-anchor="middle" fill="white" font-family="sans-serif" font-size="11" font-weight="bold">ORIGIN</text>
+  <text x="625" y="93" text-anchor="middle" fill="#bfdbfe" font-family="sans-serif" font-size="9">Full database</text>
+
+  <line x1="575" y1="105" x2="415" y2="135" stroke="#f59e0b" stroke-width="2" stroke-dasharray="5,3"/>
+  <polygon points="415,135 427,132 423,140" fill="#f59e0b"/>
+  <text x="500" y="130" text-anchor="middle" fill="#f59e0b" font-family="sans-serif" font-size="10" font-style="italic">invalidation msgs</text>
+
+  <rect x="55" y="170" width="270" height="60" rx="6" fill="#dcfce7" stroke="#86efac" stroke-width="1"/>
+  <text x="190" y="190" text-anchor="middle" fill="#166534" font-family="sans-serif" font-size="11" font-weight="bold">✓ Only caches what users ask for</text>
+  <text x="190" y="206" text-anchor="middle" fill="#166534" font-family="sans-serif" font-size="11">✓ Storage-efficient</text>
+  <text x="190" y="222" text-anchor="middle" fill="#166534" font-family="sans-serif" font-size="11">✓ Can process queries, not just serve files</text>
+
+  <rect x="375" y="170" width="270" height="60" rx="6" fill="#fef2f2" stroke="#fca5a5" stroke-width="1"/>
+  <text x="510" y="190" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="11" font-weight="bold">✗ Origin must track what each edge has</text>
+  <text x="510" y="206" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="11">✗ Edge needs compute power (runs DB)</text>
+  <text x="510" y="222" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="11">✗ Complex invalidation logic</text>
+
+  <rect x="105" y="248" width="490" height="28" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="350" y="267" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="11" font-style="italic">Analogy: A regional office keeps only the reports its local clients tend to request.</text>
+</svg>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Strategy 3: Content-Blind Caching</h3>
+
+<p style="color: #1e293b;">This is the simplest approach, and it is more common than you might think. The edge server does not understand the data at all. It does not have templates. It does not run a database. All it does is remember the <em>exact queries</em> it has seen before.</p>
+
+<p style="color: #1e293b;">When a request comes in, the edge computes a hash of the query string. It checks its cache: "have I seen this exact query before?" If yes, it returns the stored result. If no, it forwards the query to the origin, stores the result keyed by its hash, and returns it to the user. Next time someone sends the exact same query, the edge can answer instantly.</p>
+
+<p style="color: #1e293b;">The advantage is that the edge needs almost no intelligence — it is just a key-value store of query hashes to results. No database engine, no query processing. This is cheap to operate.</p>
+
+<p style="color: #1e293b;">The disadvantages are real, though. First, storage can be wasteful. Two different queries might return overlapping data, but the edge stores both results separately because it does not understand their contents. Second, invalidation is hard. When the origin data changes, the origin has to figure out which cached queries might be affected — and without understanding the query structure, that is a guessing game. Third, even small changes to a query (adding a parameter, changing capitalization) make it a "new" query in the edge's eyes, so it misses the cache even though a nearly identical query was answered moments ago.</p>
+
+<!-- SVG: Content-Blind Caching -->
+<div style="text-align: center; margin: 25px 0;">
+<svg viewBox="0 0 700 310" xmlns="http://www.w3.org/2000/svg" style="max-width: 100%; height: auto;">
+  <text x="350" y="20" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="14" font-weight="bold">Strategy 3: Content-Blind Caching</text>
+
+  <text x="70" y="95" text-anchor="middle" fill="#1e293b" font-family="sans-serif" font-size="24">👤</text>
+
+  <line x1="100" y1="90" x2="165" y2="90" stroke="#3b82f6" stroke-width="2"/>
+  <polygon points="165,90 157,85 157,95" fill="#3b82f6"/>
+  <text x="133" y="82" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="9">query</text>
+
+  <rect x="170" y="40" width="260" height="120" rx="8" fill="#dbeafe" stroke="#93c5fd" stroke-width="2"/>
+  <text x="300" y="62" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="13" font-weight="bold">EDGE SERVER</text>
+
+  <text x="300" y="82" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="11">hash("GET /user/alice") → 0x7a3f</text>
+  <rect x="185" y="92" width="230" height="55" rx="4" fill="white" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="195" y="108" fill="#64748b" font-family="sans-serif" font-size="10" font-family="monospace">0x7a3f → "Alice, joined 2031"</text>
+  <text x="195" y="123" fill="#64748b" font-family="sans-serif" font-size="10" font-family="monospace">0x2b1c → "{posts: [...]}"</text>
+  <text x="195" y="138" fill="#64748b" font-family="sans-serif" font-size="10" font-family="monospace">0x9e4d → "{score: 42}"</text>
+
+  <polygon points="510,75 550,90 510,105 470,90" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="510" y="94" text-anchor="middle" fill="#92400e" font-family="sans-serif" font-size="10" font-weight="bold">Hit?</text>
+
+  <line x1="430" y1="90" x2="470" y2="90" stroke="#94a3b8" stroke-width="1.5"/>
+  <polygon points="470,90 462,85 462,95" fill="#94a3b8"/>
+
+  <text x="510" y="65" text-anchor="middle" fill="#166534" font-family="sans-serif" font-size="10" font-weight="bold">HIT</text>
+  <line x1="510" y1="75" x2="510" y2="52" stroke="#22c55e" stroke-width="2"/>
+  <polygon points="510,52 505,60 515,60" fill="#22c55e"/>
+  <rect x="460" y="32" width="100" height="20" rx="4" fill="#dcfce7" stroke="#86efac" stroke-width="1"/>
+  <text x="510" y="46" text-anchor="middle" fill="#166534" font-family="sans-serif" font-size="10">Return cached</text>
+
+  <text x="558" y="94" text-anchor="start" fill="#991b1b" font-family="sans-serif" font-size="10" font-weight="bold">MISS</text>
+  <line x1="550" y1="90" x2="580" y2="90" stroke="#ef4444" stroke-width="2"/>
+
+  <rect x="585" y="65" width="90" height="50" rx="6" fill="#1e40af" stroke="#1e3a8a" stroke-width="2"/>
+  <text x="630" y="87" text-anchor="middle" fill="white" font-family="sans-serif" font-size="11" font-weight="bold">ORIGIN</text>
+  <text x="630" y="103" text-anchor="middle" fill="#bfdbfe" font-family="sans-serif" font-size="9">Full database</text>
+
+  <rect x="170" y="172" width="260" height="28" rx="6" fill="#eff6ff" stroke="#60a5fa" stroke-width="1.5"/>
+  <text x="300" y="191" text-anchor="middle" fill="#1e40af" font-family="sans-serif" font-size="11" font-weight="bold">Edge understands NOTHING about the data.</text>
+
+  <rect x="55" y="215" width="270" height="45" rx="6" fill="#dcfce7" stroke="#86efac" stroke-width="1"/>
+  <text x="190" y="235" text-anchor="middle" fill="#166534" font-family="sans-serif" font-size="11" font-weight="bold">✓ Minimal compute at the edge</text>
+  <text x="190" y="251" text-anchor="middle" fill="#166534" font-family="sans-serif" font-size="11">✓ Simple to implement (hash + lookup)</text>
+
+  <rect x="375" y="215" width="270" height="45" rx="6" fill="#fef2f2" stroke="#fca5a5" stroke-width="1"/>
+  <text x="510" y="235" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="11" font-weight="bold">✗ Redundant storage (overlapping results)</text>
+  <text x="510" y="251" text-anchor="middle" fill="#991b1b" font-family="sans-serif" font-size="11">✗ Hard to invalidate precisely</text>
+
+  <rect x="90" y="275" width="520" height="28" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="350" y="294" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="11" font-style="italic">Analogy: A receptionist who remembers exact questions but has no idea what the answers mean.</text>
+</svg>
+</div>
+
+<div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">The Pattern to Notice</h3>
+    <p style="color: #1e293b;">Each strategy trades <strong style="color: #1e40af;">edge intelligence</strong> against <strong style="color: #1e40af;">consistency complexity</strong>. Full replication gives the edge everything — any query works, no forwarding needed — but keeping all those copies consistent is expensive. Content-aware caching is smarter about what to store, so updates affect fewer cached items, but the origin has to carefully track who has what. Content-blind caching asks the least of the edge server, but it is the most wasteful in storage and the hardest to invalidate precisely because the origin cannot tell which cached results are affected by a given change. There is no free lunch — you are always choosing where to pay the cost.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 20px; margin: 20px 0;">
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">Connecting to Our 2032 System</h2>
+    <p style="color: #1e293b;">In our system, each site hosts identities and publishes events to other sites. Think of each site as an origin server for its own users' data. When a partner site wants to display information about those users — a profile card, a display name, a follower count — it is acting as an edge server. It needs a copy of the data, and it has to decide how to get one.</p>
+    <p style="color: #1e293b;">The three CDN strategies map directly to choices our system has to make:</p>
+    <ul style="color: #1e293b;">
+        <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">Full replication:</strong> Site A maintains a complete copy of Site B's user directory. Any lookup is instant. But every time someone on Site B updates their profile, Site B has to push that change to every partner site. If a hundred sites replicate your directory, that is a hundred update messages for every profile change.</li>
+        <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">Content-aware caching:</strong> Site A caches profiles it has been asked about, organized by the kinds of lookups it supports. More targeted — you only cache what your users actually need. But Site B has to know what Site A cached, so it can send invalidation messages when profiles change.</li>
+        <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">Content-blind caching:</strong> Site A hashes each profile request and caches the result. Simplest approach. But if a user changes their display name on Site B, Site A has no way to know which cached entries are now wrong. It just has to wait for them to expire.</li>
+    </ul>
+    <p style="color: #1e293b;">And the access-to-update ratio guides the choice. User profiles change rarely and are read often — cache aggressively, any strategy works. Activity feeds change constantly — caching is harder, staleness is visible to users almost immediately, and the "right" choice depends on how much staleness your users will tolerate.</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Colab Activity: Replication Lab</h2>
+
+<div style="background-color: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+    <p style="color: #1e293b;"><strong style="color: #1e40af;">Open the notebook here:</strong> <a href="https://colab.research.google.com/drive/1ami7usi6uJcAsliiNkKqpHAjaETfI4Ds?usp=sharing" target="_blank" style="color: #3b82f6; text-decoration: underline;">Week 7 – Replication Lab (Google Colab)</a></p>
+    <p style="color: #1e293b;">Run each cell in order. Read the explanation above each cell before you run it.</p>
+</div>
+
+<p style="color: #1e293b;">The notebook is split into three parts. Here is what each part does and why it matters.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Part 1: Seeing the Problems</h3>
+
+<p style="color: #1e293b;">Part 1 builds the simplest possible replication system: one origin server and two edge replicas. All writes go to the origin, which propagates them to the edges in background threads — but with a configurable <strong style="color: #1e40af;">delay</strong> that simulates real network latency. This is primary-based replication, the kind of setup you would see in a basic CDN.</p>
+
+<p style="color: #1e293b;">You run four experiments against this system. The first uses zero delay (the ideal world where all replicas agree instantly). The other three introduce a 2–3 second delay and show you exactly what breaks:</p>
+
+<ul style="color: #1e293b;">
+    <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">Stale reads:</strong> You write a value to the origin, then immediately read from an edge. The edge returns <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">None</code> because the propagation thread has not finished yet. This is the basic staleness problem — the edge is serving outdated data during the propagation window.</li>
+    <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">Read-your-writes violation:</strong> Alice updates her display name on the origin. A load balancer routes her next request to an edge that has not received the update. She reloads the page and does not see her own change. The system accepted her write, but from her perspective it vanished.</li>
+    <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">Monotonic reads violation:</strong> A follower count is updated from 1000 to 1050 on the origin. A user reads from the origin (sees 1050), then refreshes and gets routed to an edge that still has 1000. The value went backward.</li>
+</ul>
+
+<p style="color: #1e293b;">In all three cases, the system is working exactly as designed. There are no bugs. The "problems" are consequences of the consistency model — or the lack of one. Whether they matter depends on the application. A stale follower count is annoying. A stale bank balance is unacceptable. That judgment call is the point.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Part 2: Three Caching Strategies</h3>
+
+<p style="color: #1e293b;">Part 1 showed that propagation delay causes consistency problems. Part 2 asks a different question: <strong style="color: #1e40af;">what data should the edge servers have in the first place?</strong> It implements all three CDN caching strategies from the lesson as working Python classes, running them against the same origin server with the same data — so you can see how they compare head to head.</p>
+
+<ul style="color: #1e293b;">
+    <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">Full replication</strong> (<code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">FullReplicationEdge</code>): The edge copies the entire origin database when it is created. Every query is answered locally — no forwarding, no cache misses. You write to the origin, read from the edge (still stale), then call <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">propagate_update()</code> to push the change, and read again (now fresh). You can see the cost: every update at the origin requires an explicit push to every edge.</li>
+    <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">Content-aware caching</strong> (<code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">ContentAwareEdge</code>): The edge starts empty and learns what data to hold based on incoming queries. It understands the structure of the data (query templates like "get article by ID"). First queries are cache misses that get forwarded to the origin and then cached. Repeated queries are hits. When the origin updates a record, it sends an <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">invalidate()</code> message. The next query re-fetches from the origin. You can see both the efficiency (only caching what users request) and the coordination cost (the origin must track what each edge has).</li>
+    <li style="margin-bottom: 8px;"><strong style="color: #1e40af;">Content-blind caching</strong> (<code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-family: 'Courier New', monospace;">ContentBlindEdge</code>): The edge hashes each query string with SHA-256. Same exact query = cache hit. Even a tiny variation — a capital letter, a trailing space — produces a different hash and is treated as a brand new query. You can see this happening in the output. Invalidation is handled by a TTL (time-to-live): the cell actually waits for the TTL to expire, so you watch the edge serve stale data until the timer runs out and forces a fresh fetch.</li>
+</ul>
+
+<p style="color: #1e293b;">The notebook ends Part 2 with a comparison table that prints all three strategies side by side across several dimensions: whether the edge starts with data, whether it understands the data, how invalidation works, storage cost, and compute requirements.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Part 3: Fixing Read-Your-Writes</h3>
+
+<p style="color: #1e293b;">Part 3 takes the broken system from Part 1 and fixes one specific problem: the read-your-writes violation. It implements <strong style="color: #1e40af;">sticky sessions</strong> — when a user writes to the origin, the routing layer remembers that user and routes their subsequent reads to the origin (instead of a possibly-stale edge) for the duration of the propagation window.</p>
+
+<p style="color: #1e293b;">You run the same scenario — Alice updates her display name, then immediately reads — and this time she sees her own change because the system routed her back to the origin. Meanwhile, Bob (who did not write anything) still gets routed to the edge, where he might see stale data — but that is expected for non-writers.</p>
+
+<p style="color: #1e293b;">The notebook explains the trade-offs honestly. Sticky sessions fix read-your-writes, but they create uneven load (users who write frequently always go to the origin), reduced fault tolerance (if the origin goes down, sticky users cannot be rerouted), and the routing layer now needs per-user state. The wrap-up also describes alternative fixes — write-through to edges, read-repair, and client-side version tracking — so you can see that sticky sessions are one tool among several, not the only answer.</p>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">Discussion Question</h2>
+    <p style="color: #1e293b;">In our 2032 system, sites exchange events across site boundaries. Imagine Site A caches profile data from Site B using a content-blind strategy — it hashes each profile request and stores the result. Now a user changes their display name on Site B. What happens on Site A? How would Site A know to invalidate its cache? What if it does not? What would change if Site A used content-aware caching instead, and Site B could send invalidation messages? Which approach makes more sense for profile data specifically, given its access-to-update ratio?</p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">Key Terms and Where to Find Them</h2>
+    <p style="color: #1e293b;">If you want to dig deeper into any of these concepts, here is where to look in the reading:</p>
+    <ul style="color: #1e293b;">
+        <li><strong style="color: #1e40af;">Access-to-update ratio</strong> — Section 7.1.2</li>
+        <li><strong style="color: #1e40af;">Tight / synchronous consistency</strong> — Section 7.1.2</li>
+        <li><strong style="color: #1e40af;">Conit (consistency unit)</strong> — Section 7.2</li>
+        <li><strong style="color: #1e40af;">Sequential consistency</strong> — Section 7.2</li>
+        <li><strong style="color: #1e40af;">Causal consistency</strong> — Section 7.2</li>
+        <li><strong style="color: #1e40af;">Monotonic reads</strong> — Section 7.3.1</li>
+        <li><strong style="color: #1e40af;">Read-your-writes</strong> — Section 7.3.3</li>
+        <li><strong style="color: #1e40af;">Writes-follow-reads</strong> — Section 7.3.4</li>
+        <li><strong style="color: #1e40af;">Primary-based protocol</strong> — Section 7.5</li>
+        <li><strong style="color: #1e40af;">Full replication</strong> — Section 7.6</li>
+        <li><strong style="color: #1e40af;">Content-aware caching / query containment check</strong> — Section 7.6</li>
+        <li><strong style="color: #1e40af;">Content-blind caching</strong> — Section 7.6</li>
+    </ul>
+</div>
+
+</body>
+</html>
