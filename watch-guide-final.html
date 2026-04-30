@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watch Guide -- Liskov and Lamport Interviews</title>
+</head>
+<body>
+
+<div style="background-color: #dbeafe; border: 1px solid #93c5fd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">Final Class -- Watch Guide</h2>
+    <p style="color: #1e293b; font-size: 16px; line-height: 1.6;">These are our last class sessions. This week we watch two interviews: Barbara Liskov and Leslie Lamport. Between them they invented or named most of the theory this course is built on, including data abstraction, Lamport clocks, happens-before, Byzantine fault tolerance, Paxos, and viewstamp replication.</p>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong>Schedule:</strong> On Thursday, watch the videos wherever you are most comfortable. On Tuesday we will discuss them in class. Use this guide to know what to listen for as you watch.</p>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><strong>Assignment:</strong> There are two short-answer questions at the bottom of this page. They are a graded assignment and need to be submitted before Tuesday's class. No research required, just thinking.</p>
+    <p style="color: #1e293b; font-size: 14px;"><strong style="color: #1e40af;">Liskov:</strong> <a href="https://www.youtube.com/watch?v=T9CGjbPZeaM" style="color: #3b82f6;">https://www.youtube.com/watch?v=T9CGjbPZeaM</a></p>
+    <p style="color: #1e293b; font-size: 14px;"><strong style="color: #1e40af;">Lamport:</strong> <a href="https://www.youtube.com/watch?v=U719vQz-WFs" style="color: #3b82f6;">https://www.youtube.com/watch?v=U719vQz-WFs</a></p>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================================ -->
+<!-- LISKOV -->
+<!-- ============================================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Part 1 -- Barbara Liskov</h2>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Turing Award, 2008. Best known for data abstraction, the Liskov Substitution Principle, viewstamp replication, and Byzantine fault tolerance. She invented these things across four decades while mostly ignoring whether anyone was paying attention.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Segment 1 -- The Software Crisis (approx. 3:00)</h3>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><a href="https://www.youtube.com/watch?v=T9CGjbPZeaM&t=180s" style="color: #3b82f6;">Jump to 3:00</a></p>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Liskov describes a world where companies spent millions of dollars and years of effort on software systems that had to be thrown away because they simply did not work. The root cause was not bad programmers -- it was the absence of any principled notion of what a module was.</p>
+
+<div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Connection to 2032</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Our 2032 system has many moving parts: identity stores, event streams, auditors, recommendation services. Each site hosts its own implementation. Without the concept Liskov is about to describe, you cannot reason about whether any of those components do what they claim.</p>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Segment 2 -- Data Abstraction and Encapsulation (approx. 6:00)</h3>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><a href="https://www.youtube.com/watch?v=T9CGjbPZeaM&t=360s" style="color: #3b82f6;">Jump to 6:00</a></p>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The solution Liskov arrived at: a module exposes a set of operations and hides everything else. The internal data is invisible to the outside. You can reason about correctness one module at a time. She also explains why Python -- despite having modules -- still fails this test.</p>
+
+<div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Listen for</h3>
+    <ul style="color: #1e293b;">
+        <li>What encapsulation adds that a bare module does not provide -- and why the compiler needs to enforce it, not just the programmer</li>
+        <li>Why this matters for distributed components: if a node in the 2032 system exposes its internal state, what breaks</li>
+    </ul>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Segment 3 -- Into Distributed Computing: Argus and Transactions (approx. 10:24)</h3>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><a href="https://www.youtube.com/watch?v=T9CGjbPZeaM&t=624s" style="color: #3b82f6;">Jump to 10:24</a></p>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Liskov reads a paper about distributed databases and immediately sees the problems nobody had solved yet. Her response is a distributed programming language called Argus, which introduces "guardians" (stateful modules sitting at individual computers) connected by remote procedure calls. To handle computations that span multiple nodes, she borrows the concept of atomic transactions from the database world.</p>
+
+<div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Listen for</h3>
+    <ul style="color: #1e293b;">
+        <li>The atomicity problem: why you want a distributed computation to either complete or have no effect, with nothing in between</li>
+        <li>How this line of thinking led directly to viewstamp replication. Her phrase for it is "the beginning of cloud storage."</li>
+    </ul>
+</div>
+
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Segment 4 -- Paxos and Viewstamp Replication: The Same Idea Twice (approx. 13:12)</h3>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><a href="https://www.youtube.com/watch?v=T9CGjbPZeaM&t=792s" style="color: #3b82f6;">Jump to 13:12</a></p>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Liskov and Lamport, working entirely independently and without the internet, arrived at the same protocol for fault-tolerant state machine replication with leader failover. She describes the key advance both protocols made over ordinary distributed transactions. She also has a dry explanation for why Paxos became the name everyone remembers.</p>
+
+<div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Connection to 2032</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The leader election lab addressed exactly this problem: one payment server must be active at a time, and if it fails, a standby must take over without double-paying anyone. Paxos and viewstamp replication are the formal answers to that problem at scale. You built a simplified version of it.</p>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Segment 5 -- The Liskov Substitution Principle (approx. 15:10)</h3>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><a href="https://www.youtube.com/watch?v=T9CGjbPZeaM&t=910s" style="color: #3b82f6;">Jump to 15:10</a></p>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">The LSP came from reading object-oriented research and finding a gap: people described type hierarchies in terms of implementation differences, not behavioral guarantees. Liskov describes the rule she proposed and then learns years later, via email, that someone named it after her -- which was the moment she realized it had mattered.</p>
+
+<div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Listen for</h3>
+    <ul style="color: #1e293b;">
+        <li>The rule itself: a subclass must behave compatibly with the superclass wherever the superclass is expected -- and why this is a statement about behavior, not code</li>
+        <li>How she describes the difference between thinking from a specification versus thinking from an implementation -- this is the same distinction that comes up when you write an algorithm before you write code</li>
+    </ul>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Segment 6 -- Why Her Turing Award Was Questioned (approx. 30:43)</h3>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><a href="https://www.youtube.com/watch?v=T9CGjbPZeaM&t=1843s" style="color: #3b82f6;">Jump to 30:43</a></p>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Liskov reflects on skepticism about her Turing Award. Her answer is not defensive. She argues that the work was so foundational that people could not remember a time before it existed. When something becomes invisible infrastructure, the people who built it tend to become invisible too.</p>
+
+<div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Listen for</h3>
+    <ul style="color: #1e293b;">
+        <li>The contrast she draws between data abstraction and Byzantine fault tolerance -- one is invisible infrastructure, the other is a visible protocol -- and what that says about how we recognize contributions</li>
+    </ul>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================================ -->
+<!-- LAMPORT -->
+<!-- ============================================================ -->
+
+<h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 30px;">Part 2 -- Leslie Lamport</h2>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Turing Award, 2013. Most cited researcher in computer science. Invented Lamport clocks, the happens-before relation, Byzantine fault tolerance (with co-authors), Paxos, and LaTeX. Spent his entire career in industry. Describes his most important trait not as raw intelligence but as the ability to abstract.</p>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Segment 1 -- The Bakery Algorithm: Concurrent Programs Are Hard to Get Right (approx. 1:29)</h3>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><a href="https://www.youtube.com/watch?v=U719vQz-WFs&t=89s" style="color: #3b82f6;">Jump to 1:29</a></p>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">In 1972 Lamport reads a mutual exclusion solution in CACM and thinks it looks too complicated. He submits a simpler one. The editor sends it back with a letter pointing out a bug. That failure is what convinces him that concurrent programs require correctness proofs, and that he is going to solve the problem properly. The Bakery Algorithm -- named after the deli counter where customers take numbered tickets and wait their turn -- is the result.</p>
+
+<div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Listen for</h3>
+    <ul style="color: #1e293b;">
+        <li>Why the bug in his first attempt mattered: it was not just embarrassing -- it convinced him that correctness in concurrent systems cannot be assumed, it has to be proven. This is the same reason the gossip and election labs had test suites.</li>
+    </ul>
+</div>
+
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Segment 2 -- Time, Clocks, and Ordering (approx. 14:44)</h3>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><a href="https://www.youtube.com/watch?v=U719vQz-WFs&t=884s" style="color: #3b82f6;">Jump to 14:44</a></p>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Someone sends Lamport a paper on distributed databases and he sees a subtle correctness problem: events are being ordered in a way that could differ from the order in which they actually happened. He connects this to something he knows from physics -- the space-time view of special relativity -- and realizes there is an analogy. The result is the most-cited paper in computer science.</p>
+
+<div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Listen for</h3>
+    <ul style="color: #1e293b;">
+        <li>The definition of happens-before and why it produces a partial order -- some events have no causal relationship at all, which means you cannot say which came first. In the pub-sub lab, two events arriving at different subscribers have exactly this problem.</li>
+    </ul>
+</div>
+
+<div style="background-color: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Connection to 2032</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Our 2032 event streams cross site boundaries. Different sites see different events at different times with different context. Lamport's happens-before is the formal tool for asking which events could have caused which others. In a system where no single participant sees everything, this is not a theoretical nicety -- it is the only way to reason about ordering at all.</p>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Segment 3 -- Invariants vs. Behavioral Proofs (approx. 21:25)</h3>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><a href="https://www.youtube.com/watch?v=U719vQz-WFs&t=1285s" style="color: #3b82f6;">Jump to 21:25</a></p>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Lamport makes a simple point about why proving correctness by tracing through sequences of events is unworkable: there are too many of them. Every time you add a node, the number of possible interleavings explodes. An invariant sidesteps this entirely. Instead of asking "does every sequence end correctly," you ask "is this one property always true, at every step." That question stays manageable no matter how many nodes you have.</p>
+
+<div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Listen for</h3>
+    <ul style="color: #1e293b;">
+        <li>What an invariant is: a property of the system state that must be true at every point in execution. In the leader election lab, "exactly one payment server is active at any time" is an invariant. The whole point of the Bully and Ring algorithms was to restore it after a crash.</li>
+    </ul>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Segment 4 -- The Byzantine Generals Problem (approx. 23:31)</h3>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><a href="https://www.youtube.com/watch?v=U719vQz-WFs&t=1411s" style="color: #3b82f6;">Jump to 23:31</a></p>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">After the time clocks paper, Lamport turns to the fault tolerance problem. He assumes the worst case: a failed process can do absolutely anything. He comes up with an algorithm using digital signatures. At SRI, colleagues are working on the same problem for a different reason -- they are building flight control systems for aerodynamically unstable aircraft. The name "Byzantine" comes from Lamport wanting a catchy story the way Dijkstra's dining philosophers had a catchy story.</p>
+
+<div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Listen for</h3>
+    <ul style="color: #1e293b;">
+        <li>Why four nodes are required to tolerate one Byzantine fault -- not three. The reputation and auditing system in the AdFlow lab assumed nodes could lie; this is the formal version of that problem.</li>
+        <li>The story of how the name "Byzantine" was chosen. Lamport learned from Dijkstra that a memorable story is how a result gets known. Naming matters.</li>
+    </ul>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Segment 5 -- Paxos: Discovering It While Trying to Prove It Impossible (approx. 38:05)</h3>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><a href="https://www.youtube.com/watch?v=U719vQz-WFs&t=2285s" style="color: #3b82f6;">Jump to 38:05</a></p>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Lamport joins DEC SRC in 1985. He sees a distributed operating system that maintains consistent shared storage across a network of machines, does not believe it is possible, and starts working on an impossibility proof. At some point he realizes he is no longer writing a proof -- he is writing an algorithm. The paper then sits for eight years because the referees say it is "not terribly important."</p>
+
+<div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">What he says</h3>
+    <ul style="color: #1e293b;">
+        <li>Paxos has two phases. The first phase is leader election -- a new round of voting to agree on who is in charge. Once a stable leader exists, only phase 2 runs: the leader proposes, the others vote, done. The insight is that you pay the expensive coordination cost once, then operate cheaply until something breaks.</li>
+        <li>He draws a hard line between an algorithm and code. An algorithm is the abstract description of what must happen and why it is correct. Code is one concrete way to make a computer do that. He thinks conflating the two is where most confusion about Paxos comes from -- people read the code and think they understand the algorithm, and they do not.</li>
+        <li>On Raft: he says Raft made Paxos easier to teach, and he thinks that is real. But when he hears people say Raft is easier to "understand," he pushes back. Understanding, to him, means being able to prove it correct. He is not sure Raft actually made that part easier -- just the reading part.</li>
+    </ul>
+</div>
+
+<h3 style="color: #1d4ed8; margin-top: 25px;">Segment 6 -- If You Are Thinking Without Writing, You Only Think You Are Thinking (approx. 54:32)</h3>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;"><a href="https://www.youtube.com/watch?v=U719vQz-WFs&t=3272s" style="color: #3b82f6;">Jump to 54:32</a></p>
+<p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Lamport explains what he means by his most quoted line. The argument is about honesty: it is easy to believe you understand something you have not written down, because writing forces you to state the steps explicitly and in order. The place where unwritten steps hide is exactly where errors live.</p>
+
+<div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <h3 style="color: #1d4ed8; margin-top: 5px;">Listen for</h3>
+    <ul style="color: #1e293b;">
+        <li>Why writing a description of a system before building it is useful even if you change everything later -- the act of writing is what reveals the gaps</li>
+    </ul>
+</div>
+
+<hr style="border: 1px solid #cbd5e1; margin: 30px 0;">
+
+<!-- ============================================================ -->
+<!-- SHORT ANSWER QUESTIONS -->
+<!-- ============================================================ -->
+
+<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 20px; margin: 20px 0;">
+    <h2 style="color: #1e40af; border-left: 4px solid #3b82f6; padding-left: 15px; margin-top: 10px;">Assignment -- Submit Before Tuesday</h2>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Write a paragraph response to each of the two questions below. This is a graded assignment. Submit it before Tuesday's discussion class. No research required -- the goal is to connect what you heard in the interviews to the work you did this semester.</p>
+
+    <h3 style="color: #1d4ed8; margin-top: 20px;">Question 1</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Liskov and Lamport independently arrived at essentially the same protocol -- viewstamp replication and Paxos -- without communicating with each other. In the 2032 system, sites operate independently and exchange information only through event streams. What does this historical parallel suggest about how good distributed system designs tend to converge, and what does it imply for how the 2032 architecture should handle the possibility that two sites develop locally reasonable but conflicting protocols for handling the same kind of event?</p>
+
+    <h3 style="color: #1d4ed8; margin-top: 20px;">Question 2</h3>
+    <p style="color: #1e293b; font-size: 15px; line-height: 1.6;">Think back over the semester -- the labs, the readings, the design work on the 2032 system. Pick one topic that has stayed with you. It could be something that clicked, something that still feels unresolved, or something you want to understand more deeply now that you have more context from today's interviews. Name the topic, describe where you left off with it, and say what question you would ask about it if you had more time.</p>
+</div>
+
+</body>
+</html>
